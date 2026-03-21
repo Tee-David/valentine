@@ -1,6 +1,8 @@
 # src/valentine/llm/rate_limiter.py
 """Token-bucket style rate limiter for LLM API providers."""
 
+from __future__ import annotations
+
 import asyncio
 import time
 import logging

@@ -1,4 +1,6 @@
 # src/valentine/llm/groq.py
+from __future__ import annotations
+
 import httpx
 from typing import AsyncGenerator, Dict, Any, List
 from .provider import LLMProvider, AudioProvider

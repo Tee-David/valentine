@@ -1,6 +1,8 @@
 # src/valentine/nexus/adapter.py
 """Platform adapter abstraction — one adapter per chat platform (Telegram, Discord, etc.)."""
 
+from __future__ import annotations
+
 import abc
 from typing import Any
 

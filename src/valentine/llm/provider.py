@@ -1,4 +1,6 @@
 # src/valentine/llm/provider.py
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from typing import AsyncGenerator, Dict, Any, List
 

@@ -1,6 +1,8 @@
 # src/valentine/nexus/telegram.py
 """Full-featured Telegram platform adapter implementing PlatformAdapter ABC."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging

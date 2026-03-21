@@ -1,4 +1,6 @@
 # src/valentine/llm/fallback.py
+from __future__ import annotations
+
 import logging
 from typing import AsyncGenerator, Dict, Any, List
 from .provider import LLMProvider

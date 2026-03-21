@@ -1,4 +1,6 @@
 # src/valentine/bus/redis_bus.py
+from __future__ import annotations
+
 import redis.asyncio as redis
 import json
 import logging
