@@ -16,6 +16,9 @@ venv/
 .vscode/
 .idea/
 
+# Testing
+.pytest_cache/
+
 # OS
 .DS_Store
 Thumbs.db

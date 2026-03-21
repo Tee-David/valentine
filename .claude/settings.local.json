@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ssh -i /home/teedavid/Desktop/Projects/valentine/valentines-private.key ubuntu@130.61.111.153 \"pkill -f ''valentine.main'' 2>/dev/null; sleep 1; cd /opt/valentine && git pull && nohup venv/bin/python -m valentine.main > /tmp/valentine/valentine.log 2>&1 & echo $!\")"
+    ]
+  }
+}
