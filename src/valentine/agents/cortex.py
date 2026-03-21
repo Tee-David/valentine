@@ -1,4 +1,6 @@
 # src/valentine/agents/cortex.py
+from __future__ import annotations
+
 import logging
 from typing import List
 

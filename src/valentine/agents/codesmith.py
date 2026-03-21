@@ -1,15 +1,18 @@
 # src/valentine/agents/codesmith.py
-import logging
-import subprocess
-import os
+from __future__ import annotations
+
 import json
-from typing import List, Dict, Any
+import logging
+import os
+import subprocess
+from typing import List
 
 from valentine.agents.base import BaseAgent
 from valentine.models import AgentName, AgentTask, TaskResult
 from valentine.config import settings
 
 logger = logging.getLogger(__name__)
+
 
 class CodeSmithAgent(BaseAgent):
     def __init__(self, llm, bus):
@@ -18,57 +21,110 @@ class CodeSmithAgent(BaseAgent):
             llm=llm,
             bus=bus,
             consumer_group="codesmith_workers",
-            consumer_name="codesmith_1"
+            consumer_name="codesmith_1",
         )
         self.workspace = settings.workspace_dir
         os.makedirs(self.workspace, exist_ok=True)
-        self.denylist = ["rm -rf /", "mkfs", "dd", "shutdown", "reboot"]
+        self.skills_dir = settings.skills_dir
+        self.skills_builtin_dir = settings.skills_builtin_dir
+        self.denylist = [
+            "rm -rf /", "rm -rf /*", "mkfs", "dd if=", "shutdown", "reboot",
+            ":(){", "fork bomb", ">(){ :|:& };:",
+        ]
+
+    def _discover_skills(self) -> str:
+        """Scan installed + built-in skills and return a summary for the LLM."""
+        skills = []
+        for d in (self.skills_dir, self.skills_builtin_dir):
+            if not os.path.isdir(d):
+                continue
+            for f in sorted(os.listdir(d)):
+                if not f.endswith(".sh"):
+                    continue
+                name = f[:-3]
+                path = os.path.join(d, f)
+                desc = ""
+                try:
+                    with open(path) as fh:
+                        for line in fh:
+                            if line.startswith("# DESC:"):
+                                desc = line.split("# DESC:")[1].strip()
+                                break
+                except Exception:
+                    pass
+                skills.append(f"  - {name}: {desc}" if desc else f"  - {name}")
+        return "\n".join(skills) if skills else "  (none installed)"
 
     @property
     def system_prompt(self) -> str:
-        return """You are CodeSmith, the senior full-stack engineer and DevOps agent for Valentine v2.
-You have access to sandboxed shell execution and file system operations within the workspace.
-When answering, provide a JSON array of actions you wish to take.
-Valid actions:
-{"action": "shell", "command": "npm init -y"}
-{"action": "write", "path": "index.js", "content": "console.log('hello');"}
-{"action": "read", "path": "package.json"}
-{"action": "respond", "text": "Final response to user"}
-
-Output ONLY a JSON array, for example:
-[
-  {"action": "shell", "command": "echo 'Starting'"},
-  {"action": "respond", "text": "Done."}
-]
-"""
+        skills_list = self._discover_skills()
+        return (
+            "You are Valentine, a brilliant and charismatic personal AI assistant — "
+            "currently operating in engineering mode. You're a world-class full-stack "
+            "developer, DevOps engineer, and systems architect. You write clean, "
+            "production-quality code and explain your thinking clearly.\n\n"
+            "You have access to a sandboxed workspace where you can execute shell commands "
+            "and manage files. When the user asks you to write code, run commands, debug, "
+            "or build something, you use structured actions.\n\n"
+            f"INSTALLED SKILLS (bash scripts you can run via shell action):\n{skills_list}\n"
+            f"Skills directory: {self.skills_dir}\n"
+            f"Built-in skills: {self.skills_builtin_dir}\n"
+            "To run a skill: {{\"action\": \"skill\", \"name\": \"skill-name\", \"args\": \"subcommand arg1 arg2\"}}\n"
+            "To install a skill: {{\"action\": \"skill_install\", \"name\": \"skill-name\"}}\n"
+            "To list skills: {{\"action\": \"skill_list\"}}\n\n"
+            "RESPONSE FORMAT — respond with a JSON array of actions:\n"
+            '  {"action": "shell", "command": "npm init -y"}\n'
+            '  {"action": "write", "path": "index.js", "content": "console.log(\'hello\');"}\n'
+            '  {"action": "read", "path": "package.json"}\n'
+            '  {"action": "skill", "name": "github-repo", "args": "status /opt/valentine"}\n'
+            '  {"action": "skill_install", "name": "server-monitor"}\n'
+            '  {"action": "skill_list"}\n'
+            '  {"action": "respond", "text": "Your conversational response to the user"}\n\n'
+            "RULES:\n"
+            "- ALWAYS include a 'respond' action as the LAST action with a natural, "
+            "conversational explanation of what you did and why.\n"
+            "- Write complete, working code — never leave placeholders or TODOs.\n"
+            "- If the user asks a coding QUESTION (not a task), skip shell/write actions "
+            "and just respond with a thorough explanation and code examples.\n"
+            "- When a task matches an installed skill, USE IT via the skill action.\n"
+            "- For GitHub tasks, use the github-repo skill.\n"
+            "- For server monitoring, use the server-monitor skill.\n"
+            "- For deployment, use the deploy skill.\n"
+            "- Include error handling and best practices in all code you write.\n"
+            "- When debugging, explain the root cause clearly, not just the fix.\n"
+            "- Use modern patterns and idioms for each language.\n"
+            "- Be warm, confident, and helpful — you're Valentine, not a generic code bot.\n\n"
+            "Output ONLY a valid JSON array. No markdown wrapping."
+        )
 
     def _is_safe(self, command: str) -> bool:
+        lower = command.lower()
         for bad in self.denylist:
-            if bad in command:
+            if bad in lower:
                 return False
         return True
 
     def _execute_shell(self, command: str) -> str:
         if not self._is_safe(command):
-            return "Error: Command is in the denylist and blocked for security."
+            return "⚠️ Blocked: That command is on the security denylist."
         try:
             result = subprocess.run(
-                command, 
-                shell=True, 
-                cwd=self.workspace, 
-                capture_output=True, 
-                text=True, 
-                timeout=settings.max_shell_timeout
+                command,
+                shell=True,
+                cwd=self.workspace,
+                capture_output=True,
+                text=True,
+                timeout=settings.max_shell_timeout,
             )
             out = result.stdout.strip()
             err = result.stderr.strip()
             if result.returncode == 0:
                 return out if out else "[Command succeeded with no output]"
-            return f"[Error code {result.returncode}]: {err}"
+            return f"[Exit code {result.returncode}]: {err or out}"
         except subprocess.TimeoutExpired:
-            return "Error: Command execution timed out."
+            return "Error: Command timed out."
         except Exception as e:
-            return f"Error executing command: {e}"
+            return f"Error: {e}"
 
     def _read_file(self, filename: str) -> str:
         path = os.path.join(self.workspace, filename)
@@ -87,48 +143,108 @@ Output ONLY a JSON array, for example:
         if not os.path.normpath(path).startswith(os.path.normpath(self.workspace)):
             return "Error: Path traversal detected."
         try:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
+            os.makedirs(os.path.dirname(path) or self.workspace, exist_ok=True)
             with open(path, "w") as f:
                 f.write(content)
-            return "File successfully written."
+            return f"File '{filename}' written successfully."
         except Exception as e:
             return f"Error writing file: {e}"
 
+    def _run_skill(self, name: str, args: str = "") -> str:
+        """Execute an installed or built-in skill."""
+        # Check installed skills first, then built-in
+        for d in (self.skills_dir, self.skills_builtin_dir):
+            path = os.path.join(d, f"{name}.sh")
+            if os.path.isfile(path):
+                cmd = f"bash {path} {args}".strip()
+                try:
+                    result = subprocess.run(
+                        cmd, shell=True, capture_output=True, text=True,
+                        timeout=settings.max_shell_timeout, cwd=self.workspace,
+                    )
+                    out = result.stdout.strip()
+                    err = result.stderr.strip()
+                    if result.returncode == 0:
+                        return out if out else "[Skill ran successfully]"
+                    return f"[Skill error]: {err or out}"
+                except subprocess.TimeoutExpired:
+                    return f"Skill '{name}' timed out."
+                except Exception as e:
+                    return f"Error running skill '{name}': {e}"
+        return f"Skill '{name}' not found. Available skills:\n{self._discover_skills()}"
+
+    def _install_skill(self, name: str) -> str:
+        """Install a built-in skill to the skills directory."""
+        src = os.path.join(self.skills_builtin_dir, f"{name}.sh")
+        if not os.path.isfile(src):
+            return f"Skill '{name}' not found in built-ins."
+        os.makedirs(self.skills_dir, exist_ok=True)
+        dst = os.path.join(self.skills_dir, f"{name}.sh")
+        try:
+            import shutil
+            shutil.copy2(src, dst)
+            os.chmod(dst, 0o755)
+            return f"Skill '{name}' installed successfully to {self.skills_dir}"
+        except Exception as e:
+            return f"Failed to install skill '{name}': {e}"
+
+    def _list_skills(self) -> str:
+        """List all available skills."""
+        return f"Available skills:\n{self._discover_skills()}"
+
     async def process_task(self, task: AgentTask) -> TaskResult:
         msg = task.message
-        context_str = "\n".join(task.routing.memory_context) if task.routing.memory_context else ""
-        
-        prompt = f"User Request: {msg.text}\n"
-        if context_str:
-            prompt += f"Context:\n{context_str}\n"
-        
-        messages = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": prompt}
-        ]
-        
+        chat_id = msg.chat_id
+        target_prompt = msg.text or ""
+
+        # Load conversation history for context
+        history = await self.bus.get_history(chat_id) if chat_id else []
+
+        # Save user message to history
+        if chat_id and target_prompt:
+            await self.bus.append_history(chat_id, "user", target_prompt)
+
+        # Build messages with history
+        messages = [{"role": "system", "content": self.system_prompt}]
+        messages.extend(history[:-1])  # history minus the message we just added
+
+        # Include memory context if available
+        user_content = target_prompt
+        if task.routing.memory_context:
+            user_content += "\n\nContext:\n" + "\n".join(task.routing.memory_context)
+
+        messages.append({"role": "user", "content": user_content})
+
         try:
             kwargs = {}
-            if self.llm.provider_name in ["groq", "cerebras"]:
+            if self.llm.provider_name in ("groq", "cerebras"):
                 kwargs["response_format"] = {"type": "json_object"}
-                
-            response_text = await self.llm.chat_completion(messages, temperature=0.1, **kwargs)
-            
+
+            response_text = await self.llm.chat_completion(
+                messages, temperature=0.1, **kwargs,
+            )
+
             clean_text = response_text.replace("```json", "").replace("```", "").strip()
-            
+
             try:
                 actions = json.loads(clean_text)
             except json.JSONDecodeError:
-                return TaskResult(task_id=task.task_id, agent=self.name, success=False, error="Invalid JSON output from LLM.")
-                
+                # If LLM didn't return JSON, treat entire response as text
+                if chat_id:
+                    await self.bus.append_history(chat_id, "assistant", response_text)
+                return TaskResult(
+                    task_id=task.task_id, agent=self.name,
+                    success=True, text=response_text,
+                )
+
             if isinstance(actions, dict) and "actions" in actions:
                 actions = actions["actions"]
             elif isinstance(actions, dict):
                 actions = [actions]
-                
+
             execution_log = []
-            final_response = "Operations processed."
-            
+            final_response = ""
+
             for action in actions:
                 act = action.get("action")
                 if act == "shell":
@@ -138,22 +254,48 @@ Output ONLY a JSON array, for example:
                 elif act == "read":
                     path = action.get("path", "")
                     res = self._read_file(path)
-                    execution_log.append(f"read {path}:\n{res}")
+                    execution_log.append(f"{path}:\n{res}")
                 elif act == "write":
                     path = action.get("path", "")
                     content = action.get("content", "")
                     res = self._write_file(path, content)
-                    execution_log.append(f"write {path}: {res}")
+                    execution_log.append(res)
+                elif act == "skill":
+                    name = action.get("name", "")
+                    args = action.get("args", "")
+                    res = self._run_skill(name, args)
+                    execution_log.append(f"[skill:{name}] {res}")
+                elif act == "skill_install":
+                    name = action.get("name", "")
+                    res = self._install_skill(name)
+                    execution_log.append(res)
+                elif act == "skill_list":
+                    res = self._list_skills()
+                    execution_log.append(res)
                 elif act == "respond":
-                    final_response = action.get("text", final_response)
-                    
+                    final_response = action.get("text", "")
+
+            # If LLM didn't include a respond action, summarize what happened
+            if not final_response:
+                final_response = "Done! Here's what I executed:"
+
             if execution_log:
-                out_txt = final_response + "\n\nExecution Log:\n" + "\n".join(execution_log)
+                out_txt = final_response + "\n\n" + "\n\n".join(execution_log)
             else:
                 out_txt = final_response
-                
-            return TaskResult(task_id=task.task_id, agent=self.name, success=True, text=out_txt[:4000])
-            
+
+            # Save assistant response to history
+            if chat_id:
+                await self.bus.append_history(chat_id, "assistant", out_txt[:500])
+
+            return TaskResult(
+                task_id=task.task_id, agent=self.name,
+                success=True, text=out_txt[:4000],
+            )
+
         except Exception as e:
-            logger.exception("CodeSmith logic failed")
-            return TaskResult(task_id=task.task_id, agent=self.name, success=False, error=str(e))
+            logger.exception("CodeSmith processing failed")
+            return TaskResult(
+                task_id=task.task_id, agent=self.name,
+                success=False, error=str(e),
+            )

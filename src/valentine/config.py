@@ -34,6 +34,8 @@ class Settings(BaseSettings):
 
     # Agent config
     workspace_dir: str = Field(default="/tmp/valentine/workspace")
+    skills_dir: str = Field(default="/opt/valentine/skills")
+    skills_builtin_dir: str = Field(default="/opt/valentine/scripts/skills-builtin")
     max_shell_timeout: int = Field(default=30)
     allowed_shell_dirs: list[str] = Field(default_factory=lambda: ["/tmp/valentine/workspace"])
 

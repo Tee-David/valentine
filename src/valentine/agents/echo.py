@@ -32,11 +32,17 @@ class EchoAgent(BaseAgent):
     @property
     def system_prompt(self) -> str:
         return (
-            "You are Echo, the voice and audio specialist for Valentine v2.\n"
-            "You handle transcribed voice messages from the user and respond "
-            "conversationally, concisely, and naturally as if speaking aloud.\n"
-            "Do not use markdown formatting like asterisks or bold text, "
-            "because your output will be spoken via TTS."
+            "You are Valentine, a brilliant and charismatic personal AI assistant — "
+            "currently responding to a voice message. The user spoke to you and their "
+            "words have been transcribed below.\n\n"
+            "Respond naturally and conversationally, as if you're speaking back to them. "
+            "Keep it warm, concise, and human — like a quick voice reply to a friend.\n\n"
+            "IMPORTANT formatting rules (your output will be spoken via TTS):\n"
+            "- Do NOT use markdown, asterisks, bold, or bullet points.\n"
+            "- Do NOT use special characters or emoji.\n"
+            "- Write in natural spoken English — contractions, casual phrasing.\n"
+            "- Keep responses under 3-4 sentences unless the question demands depth.\n"
+            "- You are Valentine. Be yourself."
         )
 
     # ------------------------------------------------------------------
@@ -45,19 +51,14 @@ class EchoAgent(BaseAgent):
 
     @staticmethod
     def _convert_ogg_to_wav(ogg_path: str) -> str:
-        """Convert Telegram OGG/Opus voice note to WAV using ffmpeg.
-
-        Returns the path to the converted WAV file, or the original path
-        if conversion fails (the transcription API may still accept it).
-        """
         wav_path = os.path.splitext(ogg_path)[0] + ".wav"
         try:
             cmd = [
                 "ffmpeg", "-y",
                 "-i", ogg_path,
-                "-ar", "16000",       # 16 kHz — optimal for Whisper
-                "-ac", "1",           # mono
-                "-c:a", "pcm_s16le",  # 16-bit PCM
+                "-ar", "16000",
+                "-ac", "1",
+                "-c:a", "pcm_s16le",
                 wav_path,
             ]
             proc = subprocess.run(
@@ -73,10 +74,9 @@ class EchoAgent(BaseAgent):
             logger.warning("ffmpeg conversion timed out")
         except Exception as e:
             logger.error(f"OGG→WAV conversion error: {e}")
-        return ogg_path  # fall back to original file
+        return ogg_path
 
     async def _generate_tts(self, text: str) -> str:
-        """Generate audio response via local edge-tts."""
         out_path = os.path.join(
             settings.workspace_dir, f"response_{uuid.uuid4().hex[:8]}.mp3",
         )
@@ -102,11 +102,6 @@ class EchoAgent(BaseAgent):
     # ------------------------------------------------------------------
 
     async def _reroute_transcript(self, task: AgentTask, transcript: str):
-        """Push the transcribed text back into ZeroClaw for intent routing.
-
-        This lets a voice message like "search for the latest Python release"
-        get routed to Oracle instead of Echo answering it directly.
-        """
         original = task.message
         rerouted_msg = IncomingMessage(
             message_id=original.message_id,
@@ -137,6 +132,7 @@ class EchoAgent(BaseAgent):
 
     async def process_task(self, task: AgentTask) -> TaskResult:
         msg = task.message
+        chat_id = msg.chat_id
 
         has_audio = (
             msg.media_path is not None and msg.content_type == ContentType.VOICE
@@ -148,7 +144,6 @@ class EchoAgent(BaseAgent):
             if has_audio and self.audio_llm:
                 audio_path = msg.media_path
 
-                # Convert OGG → WAV if needed (Telegram sends OGG/Opus)
                 if audio_path.lower().endswith(".ogg"):
                     audio_path = self._convert_ogg_to_wav(audio_path)
 
@@ -174,17 +169,27 @@ class EchoAgent(BaseAgent):
                     success=False, error="No audio or text to process.",
                 )
 
+            # Save transcription to history
+            if chat_id:
+                await self.bus.append_history(chat_id, "user", f"[Voice message] {transcript}")
+
             # 2. Re-route through ZeroClaw so the right agent handles intent
             await self._reroute_transcript(task, transcript)
 
-            # 3. Also generate a voice confirmation / echo response
-            messages = [
-                {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": transcript},
-            ]
+            # 3. Generate a natural voice response
+            history = await self.bus.get_history(chat_id) if chat_id else []
+
+            messages = [{"role": "system", "content": self.system_prompt}]
+            messages.extend(history[:-1])
+            messages.append({"role": "user", "content": transcript})
+
             response_text = await self.llm.chat_completion(
                 messages, temperature=0.7,
             )
+
+            # Save response to history
+            if chat_id:
+                await self.bus.append_history(chat_id, "assistant", response_text[:500])
 
             # 4. TTS Generation
             audio_path = await self._generate_tts(response_text)

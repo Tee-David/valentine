@@ -96,3 +96,27 @@ class RedisBus:
     async def acknowledge_task(self, stream: str, group: str, message_id: str):
         """Acknowledge task completion in consumer group"""
         await self.redis.xack(stream, group, message_id)
+
+    # --- Conversation History ---
+    # Stored as a Redis list per chat_id, capped at MAX_HISTORY messages.
+
+    MAX_HISTORY = 20  # last 10 turns (user + assistant)
+
+    async def append_history(self, chat_id: str, role: str, content: str):
+        """Push a message onto the chat's conversation history."""
+        key = f"chat:{chat_id}:history"
+        entry = json.dumps({"role": role, "content": content})
+        await self.redis.rpush(key, entry)
+        await self.redis.ltrim(key, -self.MAX_HISTORY, -1)
+        await self.redis.expire(key, 86400)  # 24h TTL
+
+    async def get_history(self, chat_id: str) -> list[dict[str, str]]:
+        """Return the conversation history for a chat."""
+        key = f"chat:{chat_id}:history"
+        raw = await self.redis.lrange(key, 0, -1)
+        history = []
+        for item in raw:
+            if isinstance(item, bytes):
+                item = item.decode("utf-8")
+            history.append(json.loads(item))
+        return history
