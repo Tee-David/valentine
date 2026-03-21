@@ -4,7 +4,7 @@ import httpx
 import re
 from typing import List
 
-from duckduckgo_search import AsyncDDGS
+from duckduckgo_search import DDGS
 
 from valentine.agents.base import BaseAgent
 from valentine.models import AgentName, AgentTask, TaskResult
@@ -30,7 +30,7 @@ You rely strictly on the external information injected into your prompt when ans
 
     async def _search_web(self, query: str) -> str:
         try:
-            results = await AsyncDDGS().text(query, max_results=4)
+            results = DDGS().text(query, max_results=4)
             return "\n\n".join([f"Source: {r['title']} ({r['href']})\nSnippet: {r['body']}" for r in results])
         except Exception as e:
             logger.error(f"DDGS web search failed: {e}")

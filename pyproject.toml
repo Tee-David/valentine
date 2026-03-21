@@ -21,6 +21,7 @@ dependencies = [
     "pydub>=0.25",
     "python-dotenv>=1.0",
     "structlog>=24.0",
+    "mem0ai>=1.0",
 ]
 
 [project.optional-dependencies]
