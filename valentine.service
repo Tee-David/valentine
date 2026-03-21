@@ -1,0 +1,35 @@
+[Unit]
+Description=Valentine v2 Multi-Agent AI Assistant
+After=network.target redis.service docker.service
+Wants=redis.service
+
+[Service]
+Type=simple
+User=valentine
+Group=valentine
+WorkingDirectory=/opt/valentine
+EnvironmentFile=/opt/valentine/.env
+ExecStart=/opt/valentine/venv/bin/python -m valentine.main
+ExecStop=/bin/kill -SIGTERM $MAINPID
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+
+# Resource limits (tuned for Oracle Cloud 1 OCPU / 6GB ARM64)
+MemoryMax=4G
+CPUQuota=90%
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/tmp/valentine /opt/valentine/workspace
+PrivateTmp=false
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=valentine
+
+[Install]
+WantedBy=multi-user.target
