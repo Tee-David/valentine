@@ -73,9 +73,9 @@ class RedisBus:
         try:
             # Ensure consumer group exists, catch specific error if it already does
             await self.redis.xgroup_create(stream, group, mkstream=True)
-        except redis.exceptions.ResponseError as e:
+        except Exception as e:
             if "BUSYGROUP" not in str(e):
-                raise e
+                raise
 
         # Read from group (> indicates messages not delivered to other consumers in group)
         result = await self.redis.xreadgroup(
