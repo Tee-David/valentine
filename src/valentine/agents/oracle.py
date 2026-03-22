@@ -100,6 +100,10 @@ class OracleAgent(BaseAgent):
         if msg.user_name:
             external_context += f"\nThe user's name is {msg.user_name}. Use it naturally when appropriate."
 
+        # Include reply context so Valentine understands message threading
+        if msg.reply_to_text:
+            external_context += f"\n\nThe user is REPLYING to this previous message:\n\"{msg.reply_to_text}\"\nKeep this context in mind when responding."
+
         # URL fetching
         if "http" in target_prompt:
             urls = [w for w in target_prompt.split() if w.startswith("http")]

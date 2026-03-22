@@ -47,6 +47,7 @@ class IncomingMessage:
     text: str | None = None
     media_path: str | None = None
     user_name: str | None = None
+    reply_to_text: str | None = None
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def to_dict(self) -> dict:
@@ -59,6 +60,7 @@ class IncomingMessage:
             "text": self.text,
             "media_path": self.media_path,
             "user_name": self.user_name,
+            "reply_to_text": self.reply_to_text,
             "timestamp": self.timestamp.isoformat(),
         }
 
@@ -73,6 +75,7 @@ class IncomingMessage:
             text=data.get("text"),
             media_path=data.get("media_path"),
             user_name=data.get("user_name"),
+            reply_to_text=data.get("reply_to_text"),
             timestamp=datetime.fromisoformat(data["timestamp"]),
         )
 

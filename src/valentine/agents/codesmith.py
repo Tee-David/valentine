@@ -279,8 +279,12 @@ class CodeSmithAgent(BaseAgent):
         messages = [{"role": "system", "content": self.system_prompt}]
         messages.extend(history[:-1])  # history minus the message we just added
 
-        # Include memory context if available
+        # Include reply context if the user is replying to a message
         user_content = target_prompt
+        if msg.reply_to_text:
+            user_content += f'\n\n[Replying to: "{msg.reply_to_text}"]'
+
+        # Include memory context if available
         if task.routing.memory_context:
             user_content += "\n\nContext:\n" + "\n".join(task.routing.memory_context)
 

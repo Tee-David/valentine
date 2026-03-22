@@ -99,6 +99,15 @@ class TelegramAdapter(PlatformAdapter):
     async def start(self) -> None:
         logger.info("TelegramAdapter starting…")
         await self.app.initialize()
+
+        # Clear any stale webhook/polling session to prevent
+        # "terminated by other getUpdates request" conflicts
+        try:
+            await self.app.bot.delete_webhook(drop_pending_updates=True)
+            logger.info("Cleared stale webhook/updates before starting polling.")
+        except Exception as e:
+            logger.warning(f"delete_webhook on startup failed (non-fatal): {e}")
+
         await self.app.start()
 
         # Register slash commands with Telegram so they appear in the "/" menu
@@ -443,6 +452,13 @@ class TelegramAdapter(PlatformAdapter):
         user = update.effective_user
         user_name = user.first_name or user.username or None
 
+        # Capture reply context — if the user is replying to a message,
+        # include the original text so the agent understands the thread.
+        reply_to_text = None
+        if update.message.reply_to_message:
+            reply_msg = update.message.reply_to_message
+            reply_to_text = reply_msg.text or reply_msg.caption or None
+
         msg = IncomingMessage(
             message_id=str(update.message.message_id),
             user_id=str(user.id),
@@ -452,6 +468,7 @@ class TelegramAdapter(PlatformAdapter):
             text=text,
             media_path=media_path,
             user_name=user_name,
+            reply_to_text=reply_to_text,
             timestamp=update.message.date,
         )
         task = AgentTask(

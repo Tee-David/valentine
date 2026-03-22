@@ -151,6 +151,10 @@ class IrisAgent(BaseAgent):
 
                 analysis_prompt = target_prompt or "Describe this image in rich detail."
 
+                # Include reply context if the user is replying to a message
+                if msg.reply_to_text:
+                    analysis_prompt += f'\n\nContext — the user is replying to: "{msg.reply_to_text}"'
+
                 if intent == "ocr":
                     analysis_prompt = (
                         "Extract ALL text from this image exactly as written, "

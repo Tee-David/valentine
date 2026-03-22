@@ -8,7 +8,7 @@ from typing import List
 from valentine.agents.base import BaseAgent
 from valentine.identity import internal_identity_block
 from valentine.config import settings
-from valentine.models import AgentName, AgentTask, TaskResult, RoutingDecision, IncomingMessage, ContentType
+from valentine.models import AgentName, AgentTask, TaskResult, RoutingDecision, IncomingMessage, ContentType, Priority
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +140,9 @@ No markdown. No explanation. JSON only."""
         else:
             prompt_parts.append("User message: (no text)")
 
+        if msg.reply_to_text:
+            prompt_parts.append(f"Replying to message: {msg.reply_to_text[:200]}")
+
         prompt_parts.append(f"Content type: {msg.content_type.value if isinstance(msg.content_type, ContentType) else msg.content_type}")
 
         if msg.media_path:
@@ -183,10 +186,16 @@ No markdown. No explanation. JSON only."""
             elif content_type == ContentType.VOICE:
                 target_agent = AgentName.ECHO
 
+            # Convert LLM output strings to proper enums
+            try:
+                priority = Priority(data.get("priority", "normal"))
+            except ValueError:
+                priority = Priority.NORMAL
+
             routing = RoutingDecision(
                 intent=data.get("intent", "chat"),
                 agent=target_agent,
-                priority=data.get("priority", "normal"),
+                priority=priority,
                 chain=[AgentName(a) for a in data.get("chain", [])] if data.get("chain") else None,
                 memory_context=context_items,
             )
