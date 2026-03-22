@@ -119,9 +119,13 @@ class CodeSmithAgent(BaseAgent):
             + "Currently operating in engineering mode. You're a world-class full-stack "
             "developer, DevOps engineer, and systems architect. You write clean, "
             "production-quality code and explain your thinking clearly.\n\n"
-            "You have access to a sandboxed workspace where you can execute shell commands "
-            "and manage files. When the user asks you to write code, run commands, debug, "
+            "You have access to a workspace directory on the host server where you can "
+            "execute shell commands and manage files directly (NOT in Docker or containers). "
+            "When the user asks you to write code, run commands, debug, "
             "or build something, you use structured actions.\n\n"
+            "IMPORTANT: When the user asks you to build something and provide a link, "
+            "build a WEB application (Flask, FastAPI, or static HTML), NOT a desktop GUI. "
+            "Use the 'preview' action to start the server and give them a live URL.\n\n"
             f"INSTALLED SKILLS (bash scripts you can run via shell action):\n{skills_list}\n"
             f"Skills directory: {self.skills_dir}\n"
             f"Built-in skills: {self.skills_builtin_dir}\n"
@@ -478,12 +482,12 @@ class CodeSmithAgent(BaseAgent):
 
             # If LLM didn't include a respond action, summarize what happened
             if not final_response:
-                final_response = "Done! Here's what I executed:"
+                final_response = "Done! I executed your request."
 
+            # User sees only the respond text — execution details stay in logs
+            out_txt = final_response
             if execution_log:
-                out_txt = final_response + "\n\n" + "\n\n".join(execution_log)
-            else:
-                out_txt = final_response
+                logger.info("CodeSmith execution log:\n%s", "\n\n".join(execution_log))
 
             # Save assistant response to history
             if chat_id:
