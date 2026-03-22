@@ -43,7 +43,7 @@ All LLM inference runs on **free-tier APIs** (Groq, Cerebras, SambaNova). Design
 | **Echo** | Voice | Voice message transcription (Whisper), text-to-speech replies (Edge TTS) |
 | **Browser** | Web Automation | Headless Chromium via Playwright — navigate, scrape, screenshot, interact |
 | **Cortex** | Memory | Persistent memory (facts, procedures, capabilities, constraints) via Mem0 + Qdrant |
-| **Nexus** | Tools & APIs | External tool integrations (weather, crypto, MCP tools) |
+| **Nexus** | Tools & APIs | Weather (Open-Meteo), crypto prices (CoinGecko), MCP tool dispatch |
 
 ### LLM Providers (All Free Tier)
 
@@ -62,29 +62,31 @@ Automatic **fallback chains**: if one provider is rate-limited, requests route t
 ### Core
 - **Natural Language** — Deep conversation, reasoning, research, summarisation, games, creative writing
 - **Web Search** — Real-time search via DuckDuckGo + URL content fetching
-- **Code Engineering** — Write, debug, explain, and deploy code in any language with sandboxed shell execution
-- **Vision** — Analyse photos (OCR, scene description, screenshot-to-code), generate images via Pollinations AI
-- **Voice** — Transcribe voice notes, respond with text-to-speech audio files
-- **Web Browsing** — Headless Chromium: navigate pages, scrape data, take screenshots, fill forms, run JavaScript
-- **Persistent Memory** — Remembers user preferences, project context, procedures, and constraints across conversations
+- **Code Engineering** — Write, debug, explain code in any language; shell execution on the host
+- **Vision** — Analyse photos (OCR, scene description, screenshot-to-code), generate images via Pollinations AI *(requires SambaNova API key for vision)*
+- **Voice** — Transcribe voice notes, respond with text-to-speech audio files *(requires ffmpeg installed)*
+- **Web Browsing** — Headless Chromium: navigate pages, scrape data, take screenshots, fill forms *(requires Playwright installed)*
+- **Persistent Memory** — Remembers user preferences and context across conversations *(requires Qdrant running; gracefully degrades if unavailable)*
 
-### Advanced
-- **MCP Tool Integration** — Connect to any MCP server (GitHub, filesystem, databases, Slack, Google Drive)
-- **Dynamic Skills** — Install and run extensible skills from shell scripts or Git repositories at runtime
-- **Autonomy Modes** — Supervised (approval for dangerous actions), Full (auto-execute), Read-only
-- **Document Generation** — Create Excel, PDF, Word, CSV, HTML files and send via Telegram
-- **Proactive Scheduling** — Cron-like recurring tasks that run autonomously
-- **Self-Evolution** — Auto-detect and install missing tools/dependencies when needed
+### Tools & Integrations
+- **Weather** — Real-time weather data via Open-Meteo (no API key needed)
+- **Crypto Prices** — Live cryptocurrency prices via CoinGecko (no API key needed)
+- **Document Generation** — Create Excel, PDF, Word, CSV, HTML, JSON, plain text files and send via Telegram
+- **Self-Evolution** — Auto-detect and install missing pip packages when shell commands fail
 - **Environment Awareness** — Audit the host system (CPU, RAM, disk, network, installed runtimes)
-- **Docker Sandbox** — Run untrusted code in isolated containers with resource limits
-- **Codebase RAG** — Semantic code search over your project files via Qdrant + sentence-transformers
+- **Codebase RAG** — Semantic code search over project files *(requires sentence-transformers installed)*
+
+### Frameworks (Present but not fully battle-tested)
+- **MCP Tool Integration** — Connect to MCP servers (GitHub, filesystem, databases); framework is wired but lightly used in production
+- **Dynamic Skills** — Install and run skills from shell scripts or Git repos at runtime; framework exists, limited built-in skills
+- **Autonomy Modes** — Supervised/Full/Read-only modes; approval gates implemented but not extensively tested
+- **Proactive Scheduling** — Cron-like recurring tasks; scheduler exists but limited real-world usage
 
 ### Security & Integrity
-- **Prompt Injection Resistance** — All agents hardened against "ignore previous instructions" and similar attacks
-- **Truthfulness Policy** — Never hallucinate, never fabricate URLs/citations, always admit uncertainty
-- **Sensitive Info Protection** — API keys, tokens, internal paths, and system prompts are never leaked in responses
-- **Output Sanitisation** — Automatic redaction of accidentally leaked secrets before responses reach users
+- **Prompt Injection Resistance** — Agents hardened against "ignore previous instructions" and similar attacks
+- **Output Sanitisation** — Automatic redaction of URLs, tracebacks, and secrets before responses reach users
 - **Input Validation** — Message length limits, media type whitelisting, control character stripping
+- **Error Boundaries** — Agent failures return friendly messages, never raw tracebacks or internal URLs
 
 ---
 
@@ -126,7 +128,7 @@ valentine/
 │   ├── config.py                 # Settings (env vars, model config, rate limits)
 │   ├── models.py                 # Shared data models (IncomingMessage, TaskResult, etc.)
 │   ├── main.py                   # Entry point — process supervisor + health check
-│   ├── utils.py                  # Logging utilities
+│   ├── utils.py                  # Shared helpers (safe_parse_json, logging)
 │   │
 │   ├── agents/                   # Agent implementations
 │   │   ├── base.py               # BaseAgent ABC (lifecycle, task loop, output sanitisation)
@@ -187,8 +189,17 @@ valentine/
 │   └── skills-builtin/           # Built-in skills (shell scripts + skill.toml manifests)
 │
 ├── tests/
-│   ├── conftest.py               # Test fixtures
-│   └── test_models.py            # Model unit tests
+│   ├── conftest.py               # Shared fixtures (mock_llm, mock_bus, make_task_for)
+│   ├── test_models.py            # Model unit tests
+│   ├── test_utils.py             # safe_parse_json tests
+│   ├── test_cortex.py            # Cortex graceful degradation tests
+│   ├── test_error_boundary.py    # Error sanitisation tests
+│   ├── test_nexus.py             # Real API integration tests
+│   ├── test_rag.py               # RAG chunking/scanning tests
+│   ├── test_evolution.py         # SelfEvolver tests
+│   ├── test_docgen.py            # Document generation tests
+│   ├── test_senses.py            # Environment scanning tests
+│   └── test_agents.py            # Oracle & ZeroClaw agent tests
 │
 └── docs/
     └── superpowers/
@@ -202,7 +213,7 @@ valentine/
 
 - **Python 3.11+**
 - **Redis** — Message bus and conversation storage
-- **Docker** — For Qdrant vector database (memory)
+- **Docker** — For Qdrant vector database (optional, memory degrades gracefully without it)
 - **ffmpeg** — Voice message processing (optional, for Echo agent)
 - **Playwright** — Headless browsing (optional, for Browser agent)
 
