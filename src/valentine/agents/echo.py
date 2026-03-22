@@ -108,13 +108,20 @@ class EchoAgent(BaseAgent):
 
     async def _reroute_transcript(self, task: AgentTask, transcript: str):
         original = task.message
+        # Include caption context if the user sent one with the voice note
+        text = transcript
+        if original.text:
+            text = f"{original.text}\n\n[Voice message transcript]: {transcript}"
+
         rerouted_msg = IncomingMessage(
             message_id=original.message_id,
             chat_id=original.chat_id,
             user_id=original.user_id,
             platform=original.platform,
             content_type=ContentType.TEXT,
-            text=transcript,
+            text=text,
+            user_name=original.user_name,
+            reply_to_text=original.reply_to_text,
             timestamp=original.timestamp,
         )
         rerouted_task = AgentTask(

@@ -83,6 +83,8 @@ class TelegramAdapter(PlatformAdapter):
         self.app.add_handler(CommandHandler("memory", self._cmd_memory))
         self.app.add_handler(CommandHandler("forget", self._cmd_forget))
         self.app.add_handler(CommandHandler("clear", self._cmd_clear))
+        # Voice
+        self.app.add_handler(CommandHandler("tts", self._cmd_tts))
         # User management (admin only)
         self.app.add_handler(CommandHandler("users", self._cmd_users))
         self.app.add_handler(CommandHandler("allow", self._cmd_allow))
@@ -139,6 +141,7 @@ class TelegramAdapter(PlatformAdapter):
             BotCommand("memory", "Search my memory"),
             BotCommand("forget", "Remove a memory"),
             BotCommand("clear", "Clear conversation history"),
+            BotCommand("tts", "Get a voice reply"),
             BotCommand("users", "List allowed users (admin)"),
             BotCommand("allow", "Grant user access (admin)"),
             BotCommand("revoke", "Revoke user access (admin)"),
@@ -215,6 +218,8 @@ class TelegramAdapter(PlatformAdapter):
             "  /memory <query> — Search my memory\n"
             "  /forget <query> — Remove a memory\n"
             "  /clear — Clear conversation history\n\n"
+            "Voice:\n"
+            "  /tts <message> — Get a voice reply\n\n"
             "User Management (admin):\n"
             "  /users — List allowed users\n"
             "  /allow <id> [name] — Grant access (or reply to a message)\n"
@@ -559,6 +564,38 @@ class TelegramAdapter(PlatformAdapter):
                 "  restricted — only allowed users (use /allow to add)"
             )
 
+    async def _cmd_tts(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Send a text message as a voice reply. Usage: /tts <message>"""
+        text = update.message.text.replace("/tts", "").strip()
+        if not text:
+            await update.message.reply_text(
+                "Usage: /tts <message>\nI'll reply with a voice message!"
+            )
+            return
+
+        # Route directly to Echo (skip ZeroClaw) — Echo's TTS path handles text-only
+        user = update.effective_user
+        user_name = user.first_name or user.username or None
+        msg = IncomingMessage(
+            message_id=str(update.message.message_id),
+            user_id=str(user.id),
+            chat_id=str(update.effective_chat.id),
+            platform=MessageSource.TELEGRAM,
+            content_type=ContentType.TEXT,
+            text=text,
+            user_name=user_name,
+            timestamp=update.message.date,
+        )
+        task = AgentTask(
+            task_id=str(uuid.uuid4()),
+            agent=AgentName.ECHO,
+            routing=RoutingDecision(intent="tts", agent=AgentName.ECHO),
+            message=msg,
+        )
+        await self.bus.add_task(
+            self.bus.stream_name("echo", "task"), task.to_dict(),
+        )
+
     async def _cmd_schedule(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Handle /schedule command to create scheduled tasks."""
         text = update.message.text.replace("/schedule", "").strip()
@@ -671,7 +708,8 @@ class TelegramAdapter(PlatformAdapter):
         await self.send_typing(str(update.effective_chat.id))
         voice = update.message.voice or update.message.audio
         path = await self.download_media(voice)
-        await self._route(update, ContentType.VOICE, "", media_path=path)
+        caption = update.message.caption or ""
+        await self._route(update, ContentType.VOICE, caption, media_path=path)
 
     async def _on_document(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await self.send_typing(str(update.effective_chat.id))
@@ -767,6 +805,7 @@ class TelegramAdapter(PlatformAdapter):
                     self.app.bot.send_voice,
                     chat_id=result.chat_id,
                     voice=open(result.media_path, "rb"),
+                    caption=(result.text or "")[:1024],
                 )
             elif result.content_type == ContentType.DOCUMENT and result.media_path:
                 # Use file_name from result if available for better UX
