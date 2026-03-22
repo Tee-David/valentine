@@ -318,7 +318,9 @@ class TelegramAdapter(PlatformAdapter):
 
     def _is_admin(self, user_id: int | str) -> bool:
         """Check if a user is an admin. If no admins configured, allow all."""
-        admin_ids = settings.admin_user_ids
+        admin_ids = set(settings.admin_user_ids)
+        if settings.admin_user_id:
+            admin_ids.add(settings.admin_user_id)
         if not admin_ids:
             return True  # no restriction if not configured
         return str(user_id) in admin_ids

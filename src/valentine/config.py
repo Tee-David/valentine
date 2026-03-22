@@ -72,7 +72,9 @@ class Settings(BaseSettings):
     github_token: str = Field(default="")
 
     # Admin — Telegram user ID(s) allowed to run privileged commands (/restart, /mode, etc.)
+    # Can be set as ADMIN_USER_IDS=["123","456"] or ADMIN_USER_ID=123 (single)
     admin_user_ids: list[str] = Field(default_factory=list)
+    admin_user_id: str = Field(default="")
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
