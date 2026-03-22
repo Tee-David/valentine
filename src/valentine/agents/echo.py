@@ -50,13 +50,17 @@ class EchoAgent(BaseAgent):
     # Audio helpers
     # ------------------------------------------------------------------
 
+    # Extensions that need ffmpeg conversion to WAV for Whisper
+    _OGG_EXTENSIONS = {".ogg", ".oga", ".opus"}
+
     @staticmethod
-    def _convert_ogg_to_wav(ogg_path: str) -> str:
-        wav_path = os.path.splitext(ogg_path)[0] + ".wav"
+    def _convert_to_wav(audio_path: str) -> str:
+        """Convert OGG/OGA/OPUS audio to 16kHz mono WAV for Whisper."""
+        wav_path = os.path.splitext(audio_path)[0] + ".wav"
         try:
             cmd = [
                 "ffmpeg", "-y",
-                "-i", ogg_path,
+                "-i", audio_path,
                 "-ar", "16000",
                 "-ac", "1",
                 "-c:a", "pcm_s16le",
@@ -66,16 +70,16 @@ class EchoAgent(BaseAgent):
                 cmd, capture_output=True, text=True, timeout=30,
             )
             if proc.returncode == 0 and os.path.exists(wav_path):
-                logger.info(f"Converted {ogg_path} → {wav_path}")
+                logger.info(f"Converted {audio_path} → {wav_path}")
                 return wav_path
             logger.warning(f"ffmpeg conversion failed: {proc.stderr}")
         except FileNotFoundError:
-            logger.warning("ffmpeg not found — skipping OGG→WAV conversion")
+            logger.warning("ffmpeg not found — skipping audio conversion")
         except subprocess.TimeoutExpired:
             logger.warning("ffmpeg conversion timed out")
         except Exception as e:
-            logger.error(f"OGG→WAV conversion error: {e}")
-        return ogg_path
+            logger.error(f"Audio conversion error: {e}")
+        return audio_path
 
     async def _generate_tts(self, text: str) -> str:
         out_path = os.path.join(
@@ -145,8 +149,10 @@ class EchoAgent(BaseAgent):
             if has_audio and self.audio_llm:
                 audio_path = msg.media_path
 
-                if audio_path.lower().endswith(".ogg"):
-                    audio_path = self._convert_ogg_to_wav(audio_path)
+                # Telegram voice = .oga/.ogg/.opus — convert to WAV for Whisper
+                ext = os.path.splitext(audio_path)[1].lower()
+                if ext in self._OGG_EXTENSIONS:
+                    audio_path = self._convert_to_wav(audio_path)
 
                 logger.info(f"Echo transcribing audio file: {audio_path}")
                 try:

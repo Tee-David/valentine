@@ -114,13 +114,16 @@ class GroqClient(MultimodalProvider, AudioProvider):
         model: str | None = None,
         **kwargs: Any
     ) -> str:
+        import os
         req_model = model or settings.groq_whisper_model
+        # Send just the basename (e.g. "audio.wav") — Groq needs a recognizable filename
+        filename = os.path.basename(audio_path)
         with open(audio_path, "rb") as audio_file:
-            files = {"file": (audio_path, audio_file)}
+            files = {"file": (filename, audio_file)}
             data = {"model": req_model, **kwargs}
             response = await self._client.post(
-                "/audio/transcriptions", 
-                data=data, 
+                "/audio/transcriptions",
+                data=data,
                 files=files
             )
             response.raise_for_status()

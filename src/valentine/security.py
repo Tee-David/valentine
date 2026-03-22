@@ -21,7 +21,7 @@ MAX_MESSAGE_LENGTH = 8000  # chars — longer messages are truncated
 MAX_MEDIA_SIZE_MB = 20     # reject files bigger than this
 ALLOWED_MEDIA_EXTENSIONS = {
     ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp",  # images
-    ".ogg", ".mp3", ".wav", ".m4a", ".opus",            # audio
+    ".ogg", ".oga", ".mp3", ".wav", ".m4a", ".opus",     # audio
     ".pdf", ".txt", ".csv", ".json", ".md",             # documents
     ".mp4", ".webm",                                     # video
 }

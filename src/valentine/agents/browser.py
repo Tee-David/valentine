@@ -24,6 +24,7 @@ from valentine.agents.base import BaseAgent
 from valentine.identity import identity_block
 from valentine.models import AgentName, AgentTask, TaskResult, ContentType
 from valentine.config import settings
+from valentine.utils import safe_parse_json
 
 logger = logging.getLogger(__name__)
 
@@ -79,23 +80,44 @@ class BrowserAgent(BaseAgent):
         )
 
     async def _ensure_browser(self):
-        """Lazy-initialize Playwright browser."""
+        """Lazy-initialize Playwright browser.
+
+        On ARM64, Playwright may not ship a bundled Chromium. In that case
+        we fall back to the system-installed chromium-browser or google-chrome.
+        Set PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH to override.
+        """
         if self._browser:
             return True
 
         try:
             from playwright.async_api import async_playwright
+            import shutil
+
             self._playwright = await async_playwright().start()
-            self._browser = await self._playwright.chromium.launch(
-                headless=True,
-                args=[
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-gpu",
-                    "--single-process",  # ARM64 friendly
-                ]
-            )
+
+            launch_args = [
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--single-process",  # ARM64 friendly
+            ]
+
+            # Check for a system Chromium binary (needed on ARM64)
+            executable = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH")
+            if not executable:
+                for candidate in ("chromium-browser", "chromium", "google-chrome"):
+                    found = shutil.which(candidate)
+                    if found:
+                        executable = found
+                        break
+
+            kwargs = {"headless": True, "args": launch_args}
+            if executable:
+                kwargs["executable_path"] = executable
+                logger.info(f"Using system Chromium: {executable}")
+
+            self._browser = await self._playwright.chromium.launch(**kwargs)
             logger.info("Playwright browser initialized")
             return True
         except ImportError:
@@ -159,11 +181,9 @@ class BrowserAgent(BaseAgent):
                 kwargs["response_format"] = {"type": "json_object"}
 
             response_text = await self.llm.chat_completion(messages, temperature=0.1, **kwargs)
-            clean = response_text.replace("```json", "").replace("```", "").strip()
 
-            try:
-                actions = json.loads(clean)
-            except json.JSONDecodeError:
+            actions = safe_parse_json(response_text)
+            if actions is None:
                 if chat_id:
                     await self.bus.append_history(chat_id, "assistant", response_text)
                 return TaskResult(task_id=task.task_id, agent=self.name, success=True, text=response_text)
