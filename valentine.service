@@ -11,23 +11,24 @@ WorkingDirectory=/opt/valentine
 EnvironmentFile=/opt/valentine/.env
 ExecStart=/opt/valentine/venv/bin/python -m valentine.main
 
-# Kill ALL child processes (agents) when stopping — prevents zombie polling
+# Kill ALL child processes when stopping — prevents zombie polling
 KillMode=control-group
 KillSignal=SIGTERM
 TimeoutStopSec=15
 
+# Wait 5s before restart to let Telegram release the polling session
 Restart=always
-RestartSec=10
+RestartSec=5
 
-# Resource limits (tuned for Oracle Cloud 1 OCPU / 6GB ARM64)
+# Resource limits (tuned for Oracle Cloud ARM64)
 MemoryMax=4G
 CPUQuota=90%
 
-# Security hardening
+# Security — allow writing to workspace, skills, git, and /tmp
 NoNewPrivileges=true
 ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/tmp/valentine /opt/valentine/workspace
+ProtectHome=read-only
+ReadWritePaths=/opt/valentine/workspace /opt/valentine/.git /opt/valentine/skills /tmp
 PrivateTmp=false
 
 # Logging
