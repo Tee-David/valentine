@@ -32,7 +32,7 @@ class AccessControl:
         mode = await self.redis.get(_ACCESS_MODE_KEY)
         if mode:
             return mode if isinstance(mode, str) else mode.decode()
-        return "open"
+        return "restricted"
 
     async def set_mode(self, mode: str) -> None:
         """Set access mode: 'open' or 'restricted'."""

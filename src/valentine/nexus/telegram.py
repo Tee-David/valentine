@@ -598,9 +598,12 @@ class TelegramAdapter(PlatformAdapter):
         if self._access:
             is_admin = self._is_admin(update.effective_user.id)
             if not await self._access.is_allowed(user_id, is_admin=is_admin):
+                user_name = update.effective_user.first_name or "there"
                 await update.message.reply_text(
-                    "Sorry, you don't have access to Valentine. "
-                    "Ask the admin to grant you access with /allow."
+                    f"Hey {user_name}! I'm Valentine, a multi-agent AI assistant "
+                    f"built by WDC Solutions.\n\n"
+                    f"You don't have access yet — ask the admin to grant you "
+                    f"access. Your user ID is {user_id}."
                 )
                 return
 
