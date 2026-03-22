@@ -98,6 +98,27 @@ class TelegramAdapter(PlatformAdapter):
         logger.info("TelegramAdapter starting…")
         await self.app.initialize()
         await self.app.start()
+
+        # Register slash commands with Telegram so they appear in the "/" menu
+        from telegram import BotCommand
+        await self.app.bot.set_my_commands([
+            BotCommand("start", "Start Valentine"),
+            BotCommand("help", "List all commands"),
+            BotCommand("whoami", "Valentine's identity and origins"),
+            BotCommand("capabilities", "Everything I can do"),
+            BotCommand("status", "System health and agent status"),
+            BotCommand("agents", "List all active agents"),
+            BotCommand("mode", "Show or change autonomy mode"),
+            BotCommand("skills", "List installed skills"),
+            BotCommand("tools", "List available MCP tools"),
+            BotCommand("schedule", "Create a recurring task"),
+            BotCommand("jobs", "List scheduled jobs"),
+            BotCommand("memory", "Search my memory"),
+            BotCommand("forget", "Remove a memory"),
+            BotCommand("clear", "Clear conversation history"),
+        ])
+        logger.info("Registered Telegram bot commands.")
+
         await self.app.updater.start_polling(
             allowed_updates=Update.ALL_TYPES,
             drop_pending_updates=True,
