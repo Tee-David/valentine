@@ -25,12 +25,12 @@ class Settings(BaseSettings):
     sambanova_base_url: str = "https://api.sambanova.ai/v1"
 
     # Default models per provider
-    groq_default_model: str = "llama-3.1-8b-instant"
+    groq_default_model: str = "llama-3.3-70b-versatile"
     groq_reasoning_model: str = "qwen-qwq-32b"
     groq_whisper_model: str = "whisper-large-v3-turbo"
     cerebras_default_model: str = "qwen-3-32b"
     sambanova_default_model: str = "QwQ-32B"
-    sambanova_vision_model: str = "Qwen2.5-VL-72B"
+    sambanova_vision_model: str = "Llama-4-Maverick-17B-128E-Instruct"
 
     # Agent config
     workspace_dir: str = Field(default="/tmp/valentine/workspace")
