@@ -106,6 +106,7 @@ Automatic **fallback chains**: if one provider is rate-limited, requests route t
 | `/memory` | Search Valentine's long-term memory |
 | `/forget` | Remove a specific memory |
 | `/clear` | Clear conversation history (keeps long-term memory) |
+| `/restart` | Pull latest code and restart (admin only) |
 
 ---
 

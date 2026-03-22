@@ -1,8 +1,10 @@
 # src/valentine/agents/iris.py
 from __future__ import annotations
 
+import base64
 import json
 import logging
+import os
 import urllib.parse
 
 from valentine.agents.base import BaseAgent
@@ -11,6 +13,19 @@ from valentine.models import AgentName, AgentTask, TaskResult, ContentType
 from valentine.llm import MultimodalProvider
 
 logger = logging.getLogger(__name__)
+
+
+def _image_to_base64(path: str) -> str:
+    """Read a local image file and return a data URI for the vision API."""
+    ext = os.path.splitext(path)[1].lower()
+    mime = {
+        ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".png": "image/png", ".gif": "image/gif",
+        ".webp": "image/webp", ".bmp": "image/bmp",
+    }.get(ext, "image/jpeg")
+    with open(path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode("utf-8")
+    return f"data:{mime};base64,{b64}"
 
 
 class IrisAgent(BaseAgent):
@@ -150,8 +165,21 @@ class IrisAgent(BaseAgent):
                         "and component hierarchy. " + analysis_prompt
                     )
 
+                # Convert local file to base64 data URI for the vision API
+                image_data = msg.media_path
+                if msg.media_path and not msg.media_path.startswith("http"):
+                    try:
+                        image_data = _image_to_base64(msg.media_path)
+                    except Exception as e:
+                        logger.error(f"Failed to read image file: {e}")
+                        return TaskResult(
+                            task_id=task.task_id, agent=self.name,
+                            success=False,
+                            error="I couldn't read the image file. Try sending it again?",
+                        )
+
                 analysis = await self.multimodal_llm.image_completion(
-                    analysis_prompt, msg.media_path,
+                    analysis_prompt, image_data,
                 )
 
                 if chat_id:

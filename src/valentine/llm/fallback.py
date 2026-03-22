@@ -59,7 +59,10 @@ class FallbackChain(LLMProvider):
             except Exception as e:
                 last_exception = e
                 continue
-        raise Exception(f"All providers in fallback chain failed. Last error: {last_exception}")
+        raise Exception(
+            "I'm having trouble connecting to my AI providers right now. "
+            "Please try again in a moment!"
+        )
 
     async def stream_chat_completion(
         self,
@@ -87,4 +90,7 @@ class FallbackChain(LLMProvider):
                 logger.warning(f"Provider {provider.provider_name} stream failed: {e}")
                 last_exception = e
                 continue
-        raise Exception(f"All providers in fallback chain failed. Last error: {last_exception}")
+        raise Exception(
+            "I'm having trouble connecting to my AI providers right now. "
+            "Please try again in a moment!"
+        )

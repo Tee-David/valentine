@@ -52,7 +52,7 @@ AGENT_REGISTRY: dict[str, tuple[str, Any]] = {
     "cortex":    ("valentine.agents.cortex",         "CortexAgent",     _make_primary_chain),
     "oracle":    ("valentine.agents.oracle",         "OracleAgent",     _make_primary_chain),
     "codesmith": ("valentine.agents.codesmith",      "CodeSmithAgent",  _make_primary_chain),
-    "iris":      ("valentine.agents.iris",           "IrisAgent",       _make_sambanova),
+    "iris":      ("valentine.agents.iris",           "IrisAgent",       _make_groq),
     "echo":      ("valentine.agents.echo",           "EchoAgent",       _make_groq),
     "nexus":     ("valentine.agents.nexus",          "NexusAgent",      _make_primary_chain),
     "browser":   ("valentine.agents.browser",        "BrowserAgent",    _make_primary_chain),

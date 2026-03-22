@@ -530,10 +530,21 @@ class TelegramAdapter(PlatformAdapter):
 
         try:
             if not result.success:
+                # Show user-friendly error — log the raw one for debugging
+                error_msg = result.error or "Unknown error"
+                logger.error(f"Task {result.task_id} failed: {error_msg}")
+                # Strip internal details (URLs, tracebacks) from user-facing message
+                if "http" in error_msg or "Traceback" in error_msg:
+                    user_error = (
+                        "Oops, I ran into a temporary issue. "
+                        "Try again in a moment! 🔄"
+                    )
+                else:
+                    user_error = error_msg
                 await self._send_with_retry(
                     self.app.bot.send_message,
                     chat_id=result.chat_id,
-                    text=f"Sorry, something went wrong: {result.error}",
+                    text=user_error,
                 )
                 return
 

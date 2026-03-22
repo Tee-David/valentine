@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import httpx
 from typing import AsyncGenerator, Dict, Any, List
-from .provider import LLMProvider, AudioProvider
+from .provider import LLMProvider, MultimodalProvider, AudioProvider
 from valentine.config import settings
 
-class GroqClient(LLMProvider, AudioProvider):
+class GroqClient(MultimodalProvider, AudioProvider):
     def __init__(self):
         self._api_key = settings.groq_api_key
         self._base_url = settings.groq_base_url
@@ -79,6 +79,34 @@ class GroqClient(LLMProvider, AudioProvider):
                                 yield delta["content"]
                     except json.JSONDecodeError:
                         continue
+
+    async def image_completion(
+        self,
+        prompt: str,
+        image_url_or_base64: str,
+        model: str | None = None,
+        **kwargs: Any
+    ) -> str:
+        req_model = model or "llama-3.2-90b-vision-preview"
+
+        url_format = image_url_or_base64
+        if not image_url_or_base64.startswith("http"):
+            if not image_url_or_base64.startswith("data:"):
+                url_format = f"data:image/jpeg;base64,{image_url_or_base64}"
+
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": url_format},
+                    },
+                ],
+            }
+        ]
+        return await self.chat_completion(messages, model=req_model, **kwargs)
 
     async def transcribe_audio(
         self,
