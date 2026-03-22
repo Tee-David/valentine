@@ -81,9 +81,21 @@ _SENSITIVE_OUTPUT_PATTERNS: list[tuple[re.Pattern, str]] = [
 
 
 def sanitise_output(text: str) -> str:
-    """Scrub any accidentally leaked secrets from agent output."""
+    """Scrub any accidentally leaked secrets, internal URLs, and tracebacks from agent output."""
+    if text is None:
+        return None
+
+    # Existing: redact known secret patterns
     for pattern, replacement in _SENSITIVE_OUTPUT_PATTERNS:
         text = pattern.sub(replacement, text)
+
+    # Strip internal API URLs
+    text = re.sub(r"https?://[^\s,)]+", "[redacted-url]", text)
+
+    # Strip Python tracebacks
+    if "Traceback (most recent call last)" in text:
+        text = "An internal error occurred. Please try again."
+
     return text
 
 
