@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import logging
 import os
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib  # Python 3.10 fallback
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)

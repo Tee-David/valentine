@@ -21,6 +21,7 @@ dependencies = [
     "pydub>=0.25",
     "python-dotenv>=1.0",
     "structlog>=24.0",
+    "tomli>=2.0; python_version < '3.11'",
     "mem0ai>=1.0",
     "mcp>=1.0",
 ]

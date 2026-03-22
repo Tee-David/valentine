@@ -33,11 +33,11 @@ class Settings(BaseSettings):
     sambanova_vision_model: str = "Llama-4-Maverick-17B-128E-Instruct"
 
     # Agent config
-    workspace_dir: str = Field(default="/tmp/valentine/workspace")
+    workspace_dir: str = Field(default="/opt/valentine/workspace")
     skills_dir: str = Field(default="/opt/valentine/skills")
     skills_builtin_dir: str = Field(default="/opt/valentine/scripts/skills-builtin")
     max_shell_timeout: int = Field(default=30)
-    allowed_shell_dirs: list[str] = Field(default_factory=lambda: ["/tmp/valentine/workspace"])
+    allowed_shell_dirs: list[str] = Field(default_factory=lambda: ["/opt/valentine/workspace"])
 
     # Rate limits (requests per minute)
     groq_rpm: int = 30

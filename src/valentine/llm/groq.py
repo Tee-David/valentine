@@ -87,7 +87,7 @@ class GroqClient(MultimodalProvider, AudioProvider):
         model: str | None = None,
         **kwargs: Any
     ) -> str:
-        req_model = model or "llama-3.2-90b-vision-preview"
+        req_model = model or "meta-llama/llama-4-scout-17b-16e-instruct"
 
         url_format = image_url_or_base64
         if not image_url_or_base64.startswith("http"):

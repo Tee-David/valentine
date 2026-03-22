@@ -50,14 +50,29 @@ class OracleAgent(BaseAgent):
             "process architectures, or fallback chains. Just be helpful.\n"
         )
 
-    async def _search_web(self, query: str) -> str:
+    async def _search_web(self, query: str, recent: bool = False) -> str:
         try:
             ddgs = DDGS()
-            results = list(ddgs.text(query, max_results=5))
+            results = []
+
+            # For queries that want recent info, try news first
+            if recent:
+                try:
+                    results = list(ddgs.news(query, max_results=5))
+                except Exception:
+                    pass
+
+            # Fall back to text search (with time filter for recent queries)
+            if not results:
+                kwargs = {"max_results": 5}
+                if recent:
+                    kwargs["timelimit"] = "m"  # last month
+                results = list(ddgs.text(query, **kwargs))
+
             if not results:
                 return ""
             return "\n\n".join(
-                f"**{r.get('title', '')}** ({r.get('href', '')})\n{r.get('body', '')}"
+                f"**{r.get('title', '')}** ({r.get('href', r.get('url', ''))})\n{r.get('body', r.get('excerpt', ''))}"
                 for r in results
             )
         except Exception as e:
@@ -76,14 +91,19 @@ class OracleAgent(BaseAgent):
             logger.error(f"URL fetch failed: {e}")
             return f"[Could not fetch URL: {e}]"
 
+    _RECENT_SIGNALS = {"latest", "news", "current", "today", "recent", "now", "this week", "this month", "2026", "2025"}
+    _SEARCH_SIGNALS = {"search", "look up", "find out", "google", "what happened", "update", "who won", "score"}
+
     def _needs_search(self, text: str, intent: str) -> bool:
         """Determine if the query needs a web search."""
         lower = text.lower()
-        search_signals = [
-            "search", "latest", "news", "current", "today",
-            "recent", "what happened", "update", "2024", "2025", "2026",
-        ]
-        return intent in ("research", "search") or any(s in lower for s in search_signals)
+        all_signals = self._RECENT_SIGNALS | self._SEARCH_SIGNALS | {"2024"}
+        return intent in ("research", "search") or any(s in lower for s in all_signals)
+
+    def _wants_recent(self, text: str) -> bool:
+        """Check if the query specifically wants recent/current information."""
+        lower = text.lower()
+        return any(s in lower for s in self._RECENT_SIGNALS)
 
     async def process_task(self, task: AgentTask) -> TaskResult:
         intent = task.routing.intent
@@ -120,14 +140,15 @@ class OracleAgent(BaseAgent):
         # Web search
         elif self._needs_search(target_prompt, intent):
             search_query = target_prompt
-            for prefix in ("search for ", "search "):
+            for prefix in ("search for ", "search ", "google ", "look up "):
                 if search_query.lower().startswith(prefix):
                     search_query = search_query[len(prefix):].strip()
                     break
-            logger.info(f"Oracle searching: {search_query}")
-            results = await self._search_web(search_query)
+            recent = self._wants_recent(target_prompt)
+            logger.info(f"Oracle searching: {search_query} (recent={recent})")
+            results = await self._search_web(search_query, recent=recent)
             if results:
-                external_context += f"\n\nWEB SEARCH RESULTS:\n{results}"
+                external_context += f"\n\nWEB SEARCH RESULTS (use these to answer — cite sources):\n{results}"
 
         # Memory context
         if task.routing.memory_context:
