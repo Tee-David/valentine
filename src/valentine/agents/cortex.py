@@ -4,7 +4,6 @@ from __future__ import annotations
 import logging
 from typing import List
 
-from mem0 import Memory
 from valentine.agents.base import BaseAgent
 from valentine.identity import internal_identity_block, COMPANY_NAME, CEO_NAME
 from valentine.models import AgentName, AgentTask, TaskResult, IncomingMessage
@@ -40,9 +39,10 @@ class CortexAgent(BaseAgent):
             }
         }
         try:
+            from mem0 import Memory  # lazy import
             self.memory = Memory.from_config(mem0_config)
         except Exception as e:
-            logger.warning(f"Failed to initialize Mem0. Memory features will be degraded: {e}")
+            logger.warning(f"Memory layer unavailable (non-fatal): {e}")
             self.memory = None
 
     @property
@@ -140,8 +140,11 @@ When extracting memories, categorize them:
         msg = task.message
 
         if not self.memory:
-            return TaskResult(task_id=task.task_id, agent=self.name, success=False,
-                             error="Memory layer uninitialized")
+            return TaskResult(
+                task_id=task.task_id, agent=self.name, success=True,
+                text="Memory is temporarily unavailable. I'll still work, "
+                     "but I won't remember things across conversations right now."
+            )
 
         try:
             if intent == "store_memory" or intent == "chat":
