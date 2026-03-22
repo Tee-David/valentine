@@ -47,7 +47,7 @@ class CortexAgent(BaseAgent):
 
     @property
     def system_prompt(self) -> str:
-        return internal_identity_block() + f"""You are Cortex, the memory and context agent for Valentine v2.
+        return internal_identity_block() + f"""You are Cortex, the memory and context agent for Valentine.
 Built by {COMPANY_NAME}, led by {CEO_NAME}.
 
 Your duties:

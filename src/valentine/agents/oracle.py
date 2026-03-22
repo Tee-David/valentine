@@ -9,7 +9,8 @@ from typing import List
 from duckduckgo_search import DDGS
 
 from valentine.agents.base import BaseAgent
-from valentine.identity import identity_block
+from valentine.identity import identity_block, capabilities_block, COMPANY_NAME, CEO_NAME, PRODUCT_NAME
+from valentine.security import is_self_awareness_query
 from valentine.models import AgentName, AgentTask, TaskResult
 
 logger = logging.getLogger(__name__)
@@ -122,6 +123,17 @@ class OracleAgent(BaseAgent):
         # Build messages with history
         messages = [{"role": "system", "content": self.system_prompt}]
         messages.extend(history[:-1])  # history minus the message we just added
+
+        # When the user asks about Valentine's identity or capabilities,
+        # inject a reminder so the LLM answers from its actual capability list
+        if is_self_awareness_query(target_prompt):
+            external_context += (
+                "\n\nIMPORTANT — The user is asking about you. Answer from YOUR ACTUAL "
+                "capabilities below, NOT from generic AI knowledge. Be specific, proud, "
+                "and conversational — don't just list bullet points. Show personality.\n"
+                f"You are {PRODUCT_NAME}, built by {COMPANY_NAME}, led by {CEO_NAME}.\n"
+                + capabilities_block()
+            )
 
         user_content = target_prompt
         if external_context:
