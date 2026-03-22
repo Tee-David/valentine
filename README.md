@@ -1,4 +1,4 @@
-# Valentine v2 — Autonomous Multi-Agent AI Assistant
+# Valentine — Autonomous Multi-Agent AI Assistant
 
 > Built by **WDC Solutions** | CEO: **Taiwo David Dayomola**
 
@@ -365,6 +365,6 @@ Proprietary — WDC Solutions. All rights reserved.
 ---
 
 <p align="center">
-  <strong>Valentine v2</strong> — Built with care by <strong>WDC Solutions</strong><br>
+  <strong>Valentine</strong> — Built with care by <strong>WDC Solutions</strong><br>
   Led by <strong>Taiwo David Dayomola</strong>, CEO & Software Engineer
 </p>
