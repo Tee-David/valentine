@@ -24,11 +24,11 @@ RestartSec=5
 MemoryMax=4G
 CPUQuota=90%
 
-# Security — allow writing to workspace, skills, git, and /tmp
+# Security — allow writing to workspace, skills, git, src (for /restart pulls), and /tmp
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/opt/valentine/workspace /opt/valentine/.git /opt/valentine/skills /tmp
+ReadWritePaths=/opt/valentine/workspace /opt/valentine/.git /opt/valentine/skills /opt/valentine/src /tmp
 PrivateTmp=false
 
 # Logging
