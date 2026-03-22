@@ -5,15 +5,19 @@ Wants=redis.service
 
 [Service]
 Type=simple
-User=valentine
-Group=valentine
+User=ubuntu
+Group=ubuntu
 WorkingDirectory=/opt/valentine
 EnvironmentFile=/opt/valentine/.env
 ExecStart=/opt/valentine/venv/bin/python -m valentine.main
-ExecStop=/bin/kill -SIGTERM $MAINPID
-Restart=on-failure
+
+# Kill ALL child processes (agents) when stopping — prevents zombie polling
+KillMode=control-group
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+Restart=always
 RestartSec=10
-TimeoutStopSec=30
 
 # Resource limits (tuned for Oracle Cloud 1 OCPU / 6GB ARM64)
 MemoryMax=4G
