@@ -206,15 +206,13 @@ class TelegramAdapter(PlatformAdapter):
 
     async def _cmd_whoami(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         from valentine.identity import (
-            PRODUCT_NAME, VERSION, CODENAME, COMPANY_NAME,
-            CEO_NAME, CEO_ROLE, ARCHITECTURE_SUMMARY, PERSONALITY_TAGLINE,
+            PRODUCT_NAME, VERSION, COMPANY_NAME,
+            CEO_NAME, CEO_ROLE, PERSONALITY_TAGLINE,
         )
         await update.message.reply_text(
-            f"I am {PRODUCT_NAME} v{VERSION} ({CODENAME})\n\n"
-            f"Built by: {COMPANY_NAME}\n"
-            f"Led by: {CEO_NAME} — {CEO_ROLE}\n\n"
-            f"Architecture: {ARCHITECTURE_SUMMARY}\n\n"
-            f"Personality: {PERSONALITY_TAGLINE}"
+            f"I'm {PRODUCT_NAME} v{VERSION}\n\n"
+            f"Built by {COMPANY_NAME}, led by {CEO_NAME} ({CEO_ROLE}).\n\n"
+            f"{PERSONALITY_TAGLINE}"
         )
 
     async def _cmd_capabilities(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
