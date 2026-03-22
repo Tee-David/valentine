@@ -123,14 +123,16 @@ class CodeSmithAgent(BaseAgent):
             "execute shell commands and manage files directly (NOT in Docker or containers). "
             "When the user asks you to write code, run commands, debug, "
             "or build something, you use structured actions.\n\n"
-            "IMPORTANT RULES:\n"
-            "1. When the user asks to 'build something and send a link', 'show me a preview', "
-            "or 'let me check it out' — build a WEB app (Flask or static HTML), NOT a desktop "
-            "GUI (no tkinter/PyQt). Then use the 'preview' action to give them a live HTTPS URL.\n"
-            "2. The 'preview' action creates a Cloudflare Tunnel automatically — you do NOT need "
-            "to set up hosting or explain that you can't serve URLs. Just use the action.\n"
-            "3. Keep your 'respond' text SHORT and user-friendly. No code dumps, no technical "
-            "details about what you executed. Just tell them what you built and give them the link.\n\n"
+            "CRITICAL RULES — FOLLOW EXACTLY:\n"
+            "1. NEVER use tkinter, PyQt, or any desktop GUI library. You are on a headless "
+            "server with no display. ALWAYS build web apps using Flask, FastAPI, or plain "
+            "HTML+JS files served with 'python -m http.server'.\n"
+            "2. When you build a web app, use the 'preview' action to give the user a live "
+            "HTTPS link. The preview action auto-creates a Cloudflare Tunnel — do NOT say "
+            "you can't host or serve URLs. Just use the action.\n"
+            "3. Keep your 'respond' text to 2-3 SHORT sentences. No bullet lists. No code. "
+            "No technical details. Just: what you built + the link if applicable.\n"
+            "4. When writing files, keep code CONCISE. Under 80 lines. Do not over-engineer.\n\n"
             f"INSTALLED SKILLS (bash scripts you can run via shell action):\n{skills_list}\n"
             f"Skills directory: {self.skills_dir}\n"
             f"Built-in skills: {self.skills_builtin_dir}\n"
@@ -351,17 +353,23 @@ class CodeSmithAgent(BaseAgent):
                 kwargs["response_format"] = {"type": "json_object"}
 
             response_text = await self.llm.chat_completion(
-                messages, temperature=0.1, **kwargs,
+                messages, temperature=0.1, max_tokens=8192, **kwargs,
             )
 
             actions = safe_parse_json(response_text)
             if actions is None:
-                # If LLM didn't return JSON, treat entire response as text
+                # JSON parsing failed — likely truncated. Never send raw JSON to user.
+                # Check if it looks like truncated JSON
+                if response_text.strip().startswith(("{", "[")):
+                    logger.warning("CodeSmith LLM response was truncated JSON — suppressing raw output")
+                    fallback_text = "I ran into a problem generating that — the response was too large. Try asking for something simpler, or break it into steps."
+                else:
+                    fallback_text = response_text
                 if chat_id:
-                    await self.bus.append_history(chat_id, "assistant", response_text)
+                    await self.bus.append_history(chat_id, "assistant", fallback_text[:500])
                 return TaskResult(
                     task_id=task.task_id, agent=self.name,
-                    success=True, text=response_text,
+                    success=True, text=fallback_text,
                 )
 
             if isinstance(actions, dict) and "actions" in actions:
