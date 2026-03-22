@@ -11,6 +11,7 @@ from valentine.agents.base import BaseAgent
 from valentine.identity import identity_block
 from valentine.models import AgentName, AgentTask, TaskResult
 from valentine.config import settings
+from valentine.utils import safe_parse_json
 
 logger = logging.getLogger(__name__)
 
@@ -299,11 +300,8 @@ class CodeSmithAgent(BaseAgent):
                 messages, temperature=0.1, **kwargs,
             )
 
-            clean_text = response_text.replace("```json", "").replace("```", "").strip()
-
-            try:
-                actions = json.loads(clean_text)
-            except json.JSONDecodeError:
+            actions = safe_parse_json(response_text)
+            if actions is None:
                 # If LLM didn't return JSON, treat entire response as text
                 if chat_id:
                     await self.bus.append_history(chat_id, "assistant", response_text)

@@ -8,6 +8,7 @@ from typing import Dict, Any
 from valentine.agents.base import BaseAgent
 from valentine.identity import identity_block
 from valentine.models import AgentName, AgentTask, TaskResult
+from valentine.utils import safe_parse_json
 
 logger = logging.getLogger(__name__)
 
@@ -97,44 +98,39 @@ class NexusAgent(BaseAgent):
             response_text = await self.llm.chat_completion(
                 messages, temperature=0.1, **kwargs,
             )
-            clean_text = response_text.replace("```json", "").replace("```", "").strip()
+            data = safe_parse_json(response_text)
+            if data is not None and isinstance(data, dict) and "tool" in data:
+                tool_name = data["tool"]
+                params = data.get("parameters", {})
 
-            try:
-                data = json.loads(clean_text)
-                if isinstance(data, dict) and "tool" in data:
-                    tool_name = data["tool"]
-                    params = data.get("parameters", {})
+                logger.info(f"Nexus calling tool '{tool_name}' with {params}")
+                tool_result = await self._execute_tool(tool_name, params)
 
-                    logger.info(f"Nexus calling tool '{tool_name}' with {params}")
-                    tool_result = await self._execute_tool(tool_name, params)
+                # Use synthesis prompt for natural response
+                synthesis_messages = [
+                    {"role": "system", "content": self._synthesis_prompt},
+                ]
+                # Include recent history for context
+                synthesis_messages.extend(history[-4:])
+                synthesis_messages.append(
+                    {"role": "user", "content": (
+                        f"The user asked: \"{target_prompt}\"\n\n"
+                        f"Tool '{tool_name}' returned: {tool_result}\n\n"
+                        "Respond to the user naturally with this information."
+                    )}
+                )
 
-                    # Use synthesis prompt for natural response
-                    synthesis_messages = [
-                        {"role": "system", "content": self._synthesis_prompt},
-                    ]
-                    # Include recent history for context
-                    synthesis_messages.extend(history[-4:])
-                    synthesis_messages.append(
-                        {"role": "user", "content": (
-                            f"The user asked: \"{target_prompt}\"\n\n"
-                            f"Tool '{tool_name}' returned: {tool_result}\n\n"
-                            "Respond to the user naturally with this information."
-                        )}
-                    )
+                final_response = await self.llm.chat_completion(
+                    synthesis_messages, temperature=0.7,
+                )
 
-                    final_response = await self.llm.chat_completion(
-                        synthesis_messages, temperature=0.7,
-                    )
+                if chat_id:
+                    await self.bus.append_history(chat_id, "assistant", final_response[:500])
 
-                    if chat_id:
-                        await self.bus.append_history(chat_id, "assistant", final_response[:500])
-
-                    return TaskResult(
-                        task_id=task.task_id, agent=self.name,
-                        success=True, text=final_response,
-                    )
-            except json.JSONDecodeError:
-                pass
+                return TaskResult(
+                    task_id=task.task_id, agent=self.name,
+                    success=True, text=final_response,
+                )
 
             # Non-tool response (LLM answered directly)
             if chat_id:

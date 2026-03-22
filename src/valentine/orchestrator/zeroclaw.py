@@ -9,6 +9,7 @@ from valentine.agents.base import BaseAgent
 from valentine.identity import internal_identity_block
 from valentine.config import settings
 from valentine.models import AgentName, AgentTask, TaskResult, RoutingDecision, IncomingMessage, ContentType, Priority
+from valentine.utils import safe_parse_json
 
 logger = logging.getLogger(__name__)
 
@@ -167,8 +168,9 @@ No markdown. No explanation. JSON only."""
                 messages, temperature=0.0, max_tokens=200, **kwargs,
             )
 
-            clean_text = response_text.replace("```json", "").replace("```", "").strip()
-            data = json.loads(clean_text)
+            data = safe_parse_json(response_text)
+            if data is None:
+                raise ValueError(f"LLM returned unparseable response: {response_text[:200]}")
 
             agent_str = data.get("agent", "oracle").lower()
             try:
