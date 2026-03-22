@@ -237,12 +237,22 @@ class TelegramAdapter(PlatformAdapter):
                     f"  {name}: {'up' if s == 'up' else 'DOWN'}"
                     for name, s in sorted(agents.items())
                 ]
-                await update.message.reply_text(
+                status_text = (
                     f"System: {status.upper()}\n\n"
                     "Processes:\n" + "\n".join(agent_lines)
                 )
         except Exception as e:
-            await update.message.reply_text(f"Could not fetch status: {e}")
+            status_text = f"Could not fetch status: {e}"
+
+        try:
+            from valentine.core.senses import EnvironmentScanner
+            scanner = EnvironmentScanner()
+            env_summary = await scanner.quick_scan()
+            status_text += f"\n\n{env_summary}"
+        except Exception as e:
+            logger.warning(f"Environment scan failed (non-fatal): {e}")
+
+        await update.message.reply_text(status_text)
 
     async def _cmd_agents(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         from valentine.models import AgentName
