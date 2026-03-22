@@ -28,8 +28,8 @@ class Settings(BaseSettings):
     groq_default_model: str = "llama-3.3-70b-versatile"
     groq_reasoning_model: str = "qwen-qwq-32b"
     groq_whisper_model: str = "whisper-large-v3-turbo"
-    cerebras_default_model: str = "qwen-3-32b"
-    sambanova_default_model: str = "QwQ-32B"
+    cerebras_default_model: str = "qwen-3-235b-a22b-instruct-2507"
+    sambanova_default_model: str = "Qwen3-32B"
     sambanova_vision_model: str = "Llama-4-Maverick-17B-128E-Instruct"
 
     # Agent config
