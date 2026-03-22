@@ -139,6 +139,9 @@ class CodeSmithAgent(BaseAgent):
             '  {"action": "mcp_tool", "name": "tool_name", "args": {"key": "value"}}\n'
             '  {"action": "rag_search", "query": "semantic search query"} — Search the indexed codebase for relevant code\n'
             '  {"action": "generate_document", "format": "csv|json|excel|pdf|word|html|txt", "title": "filename", "content": "text content", "data": [["row1col1", "row1col2"], ["row2col1", "row2col2"]], "headers": ["col1", "col2"]} — Generate a document file\n'
+            '  {"action": "preview", "path": "/path/to/project"} — Start a dev server + Cloudflare Tunnel and return a live HTTPS preview URL\n'
+            '  {"action": "preview", "path": "/path/to/project", "command": "npm run dev", "port": 3000} — Preview with custom server command and port\n'
+            '  {"action": "stop_preview", "path": "/path/to/project"} — Stop a running preview (omit path to stop all)\n'
             '  {"action": "respond", "text": "Your conversational response to the user"}\n\n'
             "RULES:\n"
             "- ALWAYS include a 'respond' action as the LAST action with a natural, "
@@ -455,6 +458,21 @@ class CodeSmithAgent(BaseAgent):
                     except Exception as e:
                         output = f"Document generation failed: {e}"
                     execution_log.append(output)
+                elif act == "preview":
+                    from valentine.core.preview import create_preview
+                    proj_path = action.get("path", self.workspace)
+                    custom_cmd = action.get("command")
+                    custom_port = action.get("port")
+                    try:
+                        result = await create_preview(proj_path, custom_cmd, custom_port)
+                        execution_log.append(f"[preview] {result}")
+                    except RuntimeError as e:
+                        execution_log.append(f"[preview] Error: {e}")
+                elif act == "stop_preview":
+                    from valentine.core.preview import stop_preview
+                    proj_path = action.get("path")
+                    result = await stop_preview(proj_path)
+                    execution_log.append(f"[preview] {result}")
                 elif act == "respond":
                     final_response = action.get("text", "")
 
