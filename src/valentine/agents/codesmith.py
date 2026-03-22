@@ -138,6 +138,7 @@ class CodeSmithAgent(BaseAgent):
             '  {"action": "skill_list"}\n'
             '  {"action": "mcp_tool", "name": "tool_name", "args": {"key": "value"}}\n'
             '  {"action": "rag_search", "query": "semantic search query"} — Search the indexed codebase for relevant code\n'
+            '  {"action": "generate_document", "format": "csv|json|excel|pdf|word|html|txt", "title": "filename", "content": "text content", "data": [["row1col1", "row1col2"], ["row2col1", "row2col2"]], "headers": ["col1", "col2"]} — Generate a document file\n'
             '  {"action": "respond", "text": "Your conversational response to the user"}\n\n'
             "RULES:\n"
             "- ALWAYS include a 'respond' action as the LAST action with a natural, "
@@ -358,6 +359,8 @@ class CodeSmithAgent(BaseAgent):
 
             execution_log = []
             final_response = ""
+            final_media_path = None
+            final_file_name = None
 
             for action in actions:
                 act = action.get("action")
@@ -422,6 +425,36 @@ class CodeSmithAgent(BaseAgent):
                         results = await rag.search_formatted(query, limit=5)
                         output = results if results else "No relevant code found. The codebase may not be indexed yet."
                     execution_log.append(f"[rag_search] {output}")
+                elif act == "generate_document":
+                    from valentine.core.docgen import DocumentGenerator
+                    gen = DocumentGenerator()
+                    doc_format = action.get("format", "txt")
+                    content = action.get("content", "")
+                    title = action.get("title", "document")
+                    data = action.get("data", [])
+                    headers = action.get("headers")
+
+                    try:
+                        if doc_format == "csv":
+                            doc = await gen.generate_csv(data=data, headers=headers, file_name=title)
+                        elif doc_format == "json":
+                            doc = await gen.generate_json(data=action.get("data", {}), file_name=title)
+                        elif doc_format in ("excel", "xlsx"):
+                            doc = await gen.generate_excel(data=data, headers=headers, file_name=title)
+                        elif doc_format == "pdf":
+                            doc = await gen.generate_pdf(content, title=title, file_name=title)
+                        elif doc_format in ("word", "docx"):
+                            doc = await gen.generate_word(content, title=title, file_name=title)
+                        elif doc_format == "html":
+                            doc = await gen.generate_html(content, file_name=title)
+                        else:
+                            doc = await gen.generate_text(content, file_name=title)
+                        output = f"Generated {doc.file_type} file: {doc.file_path}"
+                        final_media_path = doc.file_path
+                        final_file_name = doc.file_name
+                    except Exception as e:
+                        output = f"Document generation failed: {e}"
+                    execution_log.append(output)
                 elif act == "respond":
                     final_response = action.get("text", "")
 
@@ -441,6 +474,8 @@ class CodeSmithAgent(BaseAgent):
             return TaskResult(
                 task_id=task.task_id, agent=self.name,
                 success=True, text=out_txt[:4000],
+                media_path=final_media_path,
+                file_name=final_file_name,
             )
 
         except Exception as e:
