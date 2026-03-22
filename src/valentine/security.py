@@ -85,6 +85,11 @@ def sanitise_output(text: str) -> str:
     if text is None:
         return None
 
+    # Strip LLM reasoning/thinking blocks (DeepSeek, Qwen, etc.)
+    text = re.sub(r"<think>[\s\S]*?</think>\s*", "", text)
+    # Also handle unclosed <think> tags (truncated responses)
+    text = re.sub(r"<think>[\s\S]*$", "", text)
+
     # Existing: redact known secret patterns
     for pattern, replacement in _SENSITIVE_OUTPUT_PATTERNS:
         text = pattern.sub(replacement, text)
@@ -94,6 +99,10 @@ def sanitise_output(text: str) -> str:
 
     # Strip Python tracebacks
     if "Traceback (most recent call last)" in text:
+        text = "An internal error occurred. Please try again."
+
+    # Strip raw HTTP error messages (e.g. httpx client errors)
+    if re.search(r"Client error '\d{3}", text):
         text = "An internal error occurred. Please try again."
 
     return text

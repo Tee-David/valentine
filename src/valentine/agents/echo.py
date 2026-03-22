@@ -144,8 +144,11 @@ class EchoAgent(BaseAgent):
         )
         transcript = msg.text or ""
 
+        # Check if this is a TTS-only request (text routed to Echo for speech)
+        tts_only = not has_audio and transcript
+
         try:
-            # 1. Transcription
+            # 1. Transcription (only for audio messages)
             if has_audio and self.audio_llm:
                 audio_path = msg.media_path
 
@@ -162,63 +165,85 @@ class EchoAgent(BaseAgent):
                     logger.error(f"Failed to transcribe: {e}")
                     return TaskResult(
                         task_id=task.task_id, agent=self.name,
-                        success=False, error=f"Transcription failed: {e}",
+                        success=False, error="I couldn't understand that voice message. Try again?",
                     )
             elif has_audio and not self.audio_llm:
                 return TaskResult(
                     task_id=task.task_id, agent=self.name,
-                    success=False, error="Audio provider not configured.",
+                    success=False, error="Voice processing isn't available right now.",
                 )
 
             if not transcript:
                 return TaskResult(
                     task_id=task.task_id, agent=self.name,
-                    success=False, error="No audio or text to process.",
+                    success=False, error="I couldn't hear anything in that voice message.",
                 )
+
+            # TTS-only mode: generate speech from the provided text
+            if tts_only:
+                return await self._handle_tts_request(task, transcript)
 
             # Save transcription to history
             if chat_id:
                 await self.bus.append_history(chat_id, "user", f"[Voice message] {transcript}")
 
-            # 2. Re-route through ZeroClaw so the right agent handles intent
+            # Re-route through ZeroClaw so the right agent handles intent.
+            # Echo does NOT also respond — the target agent sends the reply.
+            # This prevents duplicate messages.
             await self._reroute_transcript(task, transcript)
 
-            # 3. Generate a natural voice response
-            history = await self.bus.get_history(chat_id) if chat_id else []
-
-            messages = [{"role": "system", "content": self.system_prompt}]
-            messages.extend(history[:-1])
-            messages.append({"role": "user", "content": transcript})
-
-            response_text = await self.llm.chat_completion(
-                messages, temperature=0.7,
+            # Return a silent success — the re-routed agent will send the
+            # actual response to the user. We return no text so the Telegram
+            # adapter has nothing to send.
+            return TaskResult(
+                task_id=task.task_id, agent=self.name,
+                success=True, text="",
             )
-
-            # Save response to history
-            if chat_id:
-                await self.bus.append_history(chat_id, "assistant", response_text[:500])
-
-            # 4. TTS Generation
-            audio_path = await self._generate_tts(response_text)
-
-            if audio_path:
-                return TaskResult(
-                    task_id=task.task_id,
-                    agent=self.name,
-                    success=True,
-                    content_type=ContentType.VOICE,
-                    text=response_text,
-                    media_path=audio_path,
-                )
-            else:
-                return TaskResult(
-                    task_id=task.task_id, agent=self.name,
-                    success=True, text=response_text,
-                )
 
         except Exception as e:
             logger.exception("Echo processing failed")
             return TaskResult(
                 task_id=task.task_id, agent=self.name,
-                success=False, error=str(e),
+                success=False, error="Something went wrong processing your voice message.",
+            )
+
+    async def _handle_tts_request(self, task: AgentTask, text: str) -> TaskResult:
+        """Generate a TTS voice response from text."""
+        chat_id = task.message.chat_id
+
+        # Generate spoken response via LLM
+        history = await self.bus.get_history(chat_id) if chat_id else []
+        messages = [{"role": "system", "content": self.system_prompt}]
+        messages.extend(history[-6:])  # last few messages for context
+        messages.append({"role": "user", "content": text})
+
+        try:
+            response_text = await self.llm.chat_completion(
+                messages, temperature=0.7,
+            )
+        except Exception as e:
+            logger.error(f"TTS LLM call failed: {e}")
+            return TaskResult(
+                task_id=task.task_id, agent=self.name,
+                success=False, error="I'm having trouble right now. Try again in a moment.",
+            )
+
+        # Save response to history
+        if chat_id:
+            await self.bus.append_history(chat_id, "assistant", response_text[:500])
+
+        # Generate TTS audio
+        audio_path = await self._generate_tts(response_text)
+
+        if audio_path:
+            return TaskResult(
+                task_id=task.task_id, agent=self.name,
+                success=True, content_type=ContentType.VOICE,
+                text=response_text, media_path=audio_path,
+            )
+        else:
+            # TTS failed — return text instead of an error
+            return TaskResult(
+                task_id=task.task_id, agent=self.name,
+                success=True, text=response_text,
             )

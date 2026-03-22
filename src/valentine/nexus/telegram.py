@@ -25,6 +25,7 @@ from valentine.models import (
     MessageSource, RoutingDecision, TaskResult,
 )
 from valentine.nexus.adapter import PlatformAdapter
+from valentine.access import AccessControl
 from valentine.security import (
     sanitise_input, detect_injection, validate_media_extension,
 )
@@ -38,11 +39,16 @@ _CHAT_MIN_INTERVAL = 1.0  # seconds between messages to the same chat
 class TelegramAdapter(PlatformAdapter):
     """Production Telegram adapter with media, rate-limiting, and error handling."""
 
+    # Suppress duplicate errors to the same chat within this window (seconds)
+    _ERROR_DEDUP_WINDOW = 30.0
+
     def __init__(self, bus: RedisBus):
         self.bus = bus
         self.app = Application.builder().token(settings.telegram_bot_token).build()
         self._last_send: dict[str, float] = defaultdict(float)
+        self._last_error: dict[str, tuple[str, float]] = {}  # chat_id → (error_key, timestamp)
         self._response_task: asyncio.Task | None = None
+        self._access: AccessControl | None = None  # initialized on start()
         self._setup_handlers()
 
     # ------------------------------------------------------------------
@@ -77,6 +83,11 @@ class TelegramAdapter(PlatformAdapter):
         self.app.add_handler(CommandHandler("memory", self._cmd_memory))
         self.app.add_handler(CommandHandler("forget", self._cmd_forget))
         self.app.add_handler(CommandHandler("clear", self._cmd_clear))
+        # User management (admin only)
+        self.app.add_handler(CommandHandler("users", self._cmd_users))
+        self.app.add_handler(CommandHandler("allow", self._cmd_allow))
+        self.app.add_handler(CommandHandler("revoke", self._cmd_revoke))
+        self.app.add_handler(CommandHandler("access", self._cmd_access))
         # Admin
         self.app.add_handler(CommandHandler("restart", self._cmd_restart))
         # Message handlers (must be last)
@@ -98,6 +109,7 @@ class TelegramAdapter(PlatformAdapter):
 
     async def start(self) -> None:
         logger.info("TelegramAdapter starting…")
+        self._access = AccessControl(self.bus.redis)
         await self.app.initialize()
 
         # Clear any stale webhook/polling session to prevent
@@ -127,6 +139,10 @@ class TelegramAdapter(PlatformAdapter):
             BotCommand("memory", "Search my memory"),
             BotCommand("forget", "Remove a memory"),
             BotCommand("clear", "Clear conversation history"),
+            BotCommand("users", "List allowed users (admin)"),
+            BotCommand("allow", "Grant user access (admin)"),
+            BotCommand("revoke", "Revoke user access (admin)"),
+            BotCommand("access", "Set access mode (admin)"),
             BotCommand("restart", "Restart Valentine (admin only)"),
         ])
         logger.info("Registered Telegram bot commands.")
@@ -199,6 +215,11 @@ class TelegramAdapter(PlatformAdapter):
             "  /memory <query> — Search my memory\n"
             "  /forget <query> — Remove a memory\n"
             "  /clear — Clear conversation history\n\n"
+            "User Management (admin):\n"
+            "  /users — List allowed users\n"
+            "  /allow <id> [name] — Grant access (or reply to a message)\n"
+            "  /revoke <id> — Revoke access (or reply to a message)\n"
+            "  /access <open|restricted> — Set access mode\n\n"
             "Admin:\n"
             "  /restart — Pull latest code and restart (admin only)\n\n"
             "Or just send me a message — I'll figure out the rest."
@@ -371,8 +392,13 @@ class TelegramAdapter(PlatformAdapter):
 
         await update.message.reply_text("Pulling latest code and restarting... 🔄")
 
-        # Pull latest code
+        # Fix git directory permissions if needed, then pull
         try:
+            # Ensure the ubuntu user owns the repo (fixes read-only .git errors)
+            subprocess.run(
+                ["sudo", "chown", "-R", "ubuntu:ubuntu", "/opt/valentine/.git"],
+                capture_output=True, timeout=10,
+            )
             pull_result = subprocess.run(
                 ["git", "-C", "/opt/valentine", "pull", "--ff-only"],
                 capture_output=True, text=True, timeout=30,
@@ -408,6 +434,131 @@ class TelegramAdapter(PlatformAdapter):
             import os, signal
             os.kill(1, signal.SIGTERM)  # last resort
 
+    # ------------------------------------------------------------------
+    # User management commands (admin only)
+    # ------------------------------------------------------------------
+
+    async def _cmd_users(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """List allowed users."""
+        if not self._is_admin(update.effective_user.id):
+            await update.message.reply_text("Only admins can manage users.")
+            return
+        if not self._access:
+            await update.message.reply_text("Access control not initialized.")
+            return
+
+        mode = await self._access.get_mode()
+        users = await self._access.list_users()
+
+        if mode == "open":
+            header = "Access mode: OPEN (anyone can use the bot)\n"
+        else:
+            header = "Access mode: RESTRICTED (allowlist only)\n"
+
+        if not users:
+            await update.message.reply_text(
+                header + "\nNo users in allowlist. Use /allow <user_id> to add."
+            )
+            return
+
+        lines = [f"  {u['name']} (ID: {u['user_id']})" for u in users]
+        await update.message.reply_text(
+            header + f"\nAllowed users ({len(users)}):\n" + "\n".join(lines)
+        )
+
+    async def _cmd_allow(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Grant a user access. Usage: /allow <user_id> [name]
+        Or reply to a user's message with /allow to grant them access."""
+        if not self._is_admin(update.effective_user.id):
+            await update.message.reply_text("Only admins can manage users.")
+            return
+        if not self._access:
+            await update.message.reply_text("Access control not initialized.")
+            return
+
+        args = update.message.text.replace("/allow", "").strip()
+
+        # If replying to someone's message, use their ID
+        if update.message.reply_to_message and not args:
+            target = update.message.reply_to_message.from_user
+            user_id = str(target.id)
+            user_name = target.first_name or target.username or "Unknown"
+        elif args:
+            parts = args.split(maxsplit=1)
+            user_id = parts[0]
+            user_name = parts[1] if len(parts) > 1 else "Unknown"
+        else:
+            await update.message.reply_text(
+                "Usage: /allow <user_id> [name]\n"
+                "Or reply to a user's message with /allow"
+            )
+            return
+
+        added = await self._access.allow_user(user_id, user_name)
+        if added:
+            await update.message.reply_text(f"Granted access to {user_name} (ID: {user_id})")
+        else:
+            await update.message.reply_text(f"{user_name} (ID: {user_id}) already has access.")
+
+    async def _cmd_revoke(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Revoke a user's access. Usage: /revoke <user_id>"""
+        if not self._is_admin(update.effective_user.id):
+            await update.message.reply_text("Only admins can manage users.")
+            return
+        if not self._access:
+            await update.message.reply_text("Access control not initialized.")
+            return
+
+        args = update.message.text.replace("/revoke", "").strip()
+
+        if update.message.reply_to_message and not args:
+            target = update.message.reply_to_message.from_user
+            user_id = str(target.id)
+        elif args:
+            user_id = args.split()[0]
+        else:
+            await update.message.reply_text(
+                "Usage: /revoke <user_id>\n"
+                "Or reply to a user's message with /revoke"
+            )
+            return
+
+        removed = await self._access.revoke_user(user_id)
+        if removed:
+            await update.message.reply_text(f"Revoked access for user {user_id}.")
+        else:
+            await update.message.reply_text(f"User {user_id} wasn't in the allowlist.")
+
+    async def _cmd_access(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Set access mode. Usage: /access <open|restricted>"""
+        if not self._is_admin(update.effective_user.id):
+            await update.message.reply_text("Only admins can manage access.")
+            return
+        if not self._access:
+            await update.message.reply_text("Access control not initialized.")
+            return
+
+        mode = update.message.text.replace("/access", "").strip().lower()
+        if mode in ("open", "restricted"):
+            await self._access.set_mode(mode)
+            if mode == "open":
+                await update.message.reply_text(
+                    "Access mode: OPEN — anyone can use the bot."
+                )
+            else:
+                await update.message.reply_text(
+                    "Access mode: RESTRICTED — only allowed users can use the bot.\n"
+                    "Use /allow <user_id> to grant access."
+                )
+        else:
+            current = await self._access.get_mode()
+            await update.message.reply_text(
+                f"Current access mode: {current.upper()}\n\n"
+                "Usage: /access <open|restricted>\n"
+                "  open — anyone can use the bot\n"
+                "  restricted — only allowed users (use /allow to add)"
+            )
+
     async def _cmd_schedule(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Handle /schedule command to create scheduled tasks."""
         text = update.message.text.replace("/schedule", "").strip()
@@ -442,6 +593,17 @@ class TelegramAdapter(PlatformAdapter):
         text: str,
         media_path: str | None = None,
     ):
+        # --- Access control gate ---
+        user_id = str(update.effective_user.id)
+        if self._access:
+            is_admin = self._is_admin(update.effective_user.id)
+            if not await self._access.is_allowed(user_id, is_admin=is_admin):
+                await update.message.reply_text(
+                    "Sorry, you don't have access to Valentine. "
+                    "Ask the admin to grant you access with /allow."
+                )
+                return
+
         # --- Input sanitisation ---
         text = sanitise_input(text) if text else text
 
@@ -558,14 +720,31 @@ class TelegramAdapter(PlatformAdapter):
                 # Show user-friendly error — log the raw one for debugging
                 error_msg = result.error or "Unknown error"
                 logger.error(f"Task {result.task_id} failed: {error_msg}")
-                # Strip internal details (URLs, tracebacks) from user-facing message
-                if "http" in error_msg or "Traceback" in error_msg:
+
+                # Always replace internal/technical errors with friendly message
+                _technical_patterns = (
+                    "http", "Traceback", "Client error", "Server error",
+                    "429", "500", "502", "503", "504", "redacted",
+                    "Too Many Requests", "rate limit", "timed out",
+                    "Connection", "ECONNREFUSED", "Internal error",
+                )
+                if any(p.lower() in error_msg.lower() for p in _technical_patterns):
                     user_error = (
                         "Oops, I ran into a temporary issue. "
                         "Try again in a moment! 🔄"
                     )
                 else:
                     user_error = error_msg
+
+                # Deduplicate: don't spam the same error to the same chat
+                now = time.monotonic()
+                error_key = user_error[:50]  # group similar errors
+                last = self._last_error.get(result.chat_id)
+                if last and last[0] == error_key and (now - last[1]) < self._ERROR_DEDUP_WINDOW:
+                    logger.info(f"Suppressing duplicate error for chat {result.chat_id}")
+                    return
+                self._last_error[result.chat_id] = (error_key, now)
+
                 await self._send_with_retry(
                     self.app.bot.send_message,
                     chat_id=result.chat_id,
@@ -597,8 +776,10 @@ class TelegramAdapter(PlatformAdapter):
                     caption=(result.text or "")[:1024],
                 )
             else:
-                # TEXT or fallback
-                text = result.text or "(empty response)"
+                # TEXT or fallback — skip truly empty responses (e.g. Echo re-route)
+                text = (result.text or "").strip()
+                if not text:
+                    return
                 # Telegram has a 4096-char limit per message
                 for chunk in _chunk_text(text, 4096):
                     await self._send_with_retry(

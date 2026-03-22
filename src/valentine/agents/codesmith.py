@@ -11,7 +11,7 @@ from valentine.agents.base import BaseAgent
 from valentine.identity import identity_block
 from valentine.models import AgentName, AgentTask, TaskResult
 from valentine.config import settings
-from valentine.utils import safe_parse_json
+from valentine.utils import safe_parse_json, extract_partial_json_objects
 
 logger = logging.getLogger(__name__)
 
@@ -359,18 +359,29 @@ class CodeSmithAgent(BaseAgent):
             actions = safe_parse_json(response_text)
             if actions is None:
                 # JSON parsing failed — likely truncated. Never send raw JSON to user.
-                # Check if it looks like truncated JSON
                 if response_text.strip().startswith(("{", "[")):
-                    logger.warning("CodeSmith LLM response was truncated JSON — suppressing raw output")
-                    fallback_text = "I ran into a problem generating that — the response was too large. Try asking for something simpler, or break it into steps."
+                    # Try to recover complete action objects from truncated array
+                    recovered = extract_partial_json_objects(response_text)
+                    if recovered:
+                        logger.info(f"CodeSmith recovered {len(recovered)} actions from truncated JSON")
+                        actions = recovered
+                    else:
+                        logger.warning("CodeSmith LLM response was truncated JSON — no recoverable actions")
+                        fallback_text = "I ran into a problem generating that. Try breaking it into smaller steps."
+                        if chat_id:
+                            await self.bus.append_history(chat_id, "assistant", fallback_text[:500])
+                        return TaskResult(
+                            task_id=task.task_id, agent=self.name,
+                            success=True, text=fallback_text,
+                        )
                 else:
                     fallback_text = response_text
-                if chat_id:
-                    await self.bus.append_history(chat_id, "assistant", fallback_text[:500])
-                return TaskResult(
-                    task_id=task.task_id, agent=self.name,
-                    success=True, text=fallback_text,
-                )
+                    if chat_id:
+                        await self.bus.append_history(chat_id, "assistant", fallback_text[:500])
+                    return TaskResult(
+                        task_id=task.task_id, agent=self.name,
+                        success=True, text=fallback_text,
+                    )
 
             if isinstance(actions, dict) and "actions" in actions:
                 actions = actions["actions"]

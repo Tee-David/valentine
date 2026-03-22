@@ -34,6 +34,50 @@ def safe_parse_json(text: str) -> dict | list | None:
     return None
 
 
+def extract_partial_json_objects(text: str) -> list[dict]:
+    """Extract complete JSON objects from a potentially truncated JSON array.
+
+    When the LLM response is truncated mid-array, this recovers all complete
+    objects that appeared before the truncation point.
+    """
+    results = []
+    # Find all complete top-level {...} objects
+    depth = 0
+    start = None
+    in_string = False
+    escape_next = False
+
+    for i, ch in enumerate(text):
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == '\\' and in_string:
+            escape_next = True
+            continue
+        if ch == '"' and not escape_next:
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+
+        if ch == '{':
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0 and start is not None:
+                try:
+                    obj = json.loads(text[start:i + 1])
+                    if isinstance(obj, dict):
+                        results.append(obj)
+                except json.JSONDecodeError:
+                    pass
+                start = None
+
+    return results
+
+
 def setup_logging() -> None:
     structlog.configure(
         processors=[
