@@ -129,6 +129,25 @@ class TelegramAdapter(PlatformAdapter):
         self._response_task = asyncio.create_task(self._listen_for_responses())
         logger.info("TelegramAdapter running.")
 
+        # Notify admins that Valentine is back online
+        await self._notify_admins_startup()
+
+    async def _notify_admins_startup(self):
+        """Send a message to all admin users that Valentine is back online."""
+        admin_ids = set(settings.admin_user_ids)
+        if settings.admin_user_id:
+            admin_ids.add(settings.admin_user_id)
+        if not admin_ids:
+            return
+        for admin_id in admin_ids:
+            try:
+                await self.app.bot.send_message(
+                    chat_id=admin_id,
+                    text="I'm back online and ready to go! ✅",
+                )
+            except Exception as e:
+                logger.warning(f"Failed to notify admin {admin_id}: {e}")
+
     async def stop(self) -> None:
         logger.info("TelegramAdapter stopping…")
         if self._response_task:
