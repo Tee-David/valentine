@@ -1,6 +1,6 @@
 # src/valentine/__init__.py
 """
-Valentine v2 — Multi-Agent AI Assistant
+Valentine — Multi-Agent AI Assistant
 Built by WDC Solutions | CEO: Taiwo David Dayomola
 """
 

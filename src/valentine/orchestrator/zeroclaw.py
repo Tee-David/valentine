@@ -7,6 +7,7 @@ from typing import List
 
 from valentine.agents.base import BaseAgent
 from valentine.identity import internal_identity_block
+from valentine.config import settings
 from valentine.models import AgentName, AgentTask, TaskResult, RoutingDecision, IncomingMessage, ContentType
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,29 @@ class ZeroClawRouter(BaseAgent):
         self.task_stream = self.bus.ROUTER_STREAM
         self.tool_registry = tool_registry
         self._tool_summary = ""
+
+        # Lightweight Mem0 reader for routing context (read-only)
+        self._memory = None
+        try:
+            from mem0 import Memory
+            mem0_config = {
+                "vector_store": {
+                    "provider": "qdrant",
+                    "config": {
+                        "host": settings.qdrant_host,
+                        "port": settings.qdrant_port,
+                        "collection_name": "valentine_memory",
+                    },
+                },
+                "embedder": {
+                    "provider": "huggingface",
+                    "config": {"model": "all-MiniLM-L6-v2"},
+                },
+            }
+            self._memory = Memory.from_config(mem0_config)
+            logger.info("ZeroClaw memory reader initialized")
+        except Exception as e:
+            logger.warning(f"ZeroClaw memory reader unavailable (non-fatal): {e}")
 
     @property
     def system_prompt(self) -> str:
@@ -79,7 +103,29 @@ No markdown. No explanation. JSON only."""
         await self.bus.add_task(self.result_stream, result.to_dict())
 
     async def _fetch_context(self, message: IncomingMessage) -> List[str]:
-        return []
+        """Fetch memory context from Qdrant to enrich routing decisions."""
+        if not self._memory or not message.text:
+            return []
+        try:
+            results = self._memory.search(message.text, user_id=message.user_id, limit=3)
+            context = []
+            for r in results:
+                mem_type = r.get("metadata", {}).get("type", "fact")
+                text = r.get("text", r.get("memory", ""))
+                if not text:
+                    continue
+                if mem_type == "procedure":
+                    context.append(f"[HOW-TO] {text}")
+                elif mem_type == "capability":
+                    context.append(f"[INSTALLED] {text}")
+                elif mem_type == "constraint":
+                    context.append(f"[LIMITATION] {text}")
+                else:
+                    context.append(text)
+            return context
+        except Exception as e:
+            logger.warning(f"ZeroClaw memory lookup failed (non-fatal): {e}")
+            return []
 
     async def process_task(self, task: AgentTask) -> TaskResult:
         msg = task.message
@@ -87,6 +133,8 @@ No markdown. No explanation. JSON only."""
 
         # Build a rich prompt that includes content type and media info
         prompt_parts = []
+        if msg.user_name:
+            prompt_parts.append(f"User name: {msg.user_name}")
         if msg.text:
             prompt_parts.append(f"User message: {msg.text}")
         else:

@@ -359,14 +359,19 @@ class TelegramAdapter(PlatformAdapter):
             )
             injection_flagged = True
 
+        # Capture the user's display name for personalized responses
+        user = update.effective_user
+        user_name = user.first_name or user.username or None
+
         msg = IncomingMessage(
             message_id=str(update.message.message_id),
-            user_id=str(update.effective_user.id),
+            user_id=str(user.id),
             chat_id=str(update.effective_chat.id),
             platform=MessageSource.TELEGRAM,
             content_type=content_type,
             text=text,
             media_path=media_path,
+            user_name=user_name,
             timestamp=update.message.date,
         )
         task = AgentTask(

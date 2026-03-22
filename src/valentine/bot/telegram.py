@@ -29,7 +29,7 @@ class TelegramBot:
         self.app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, self.handle_voice))
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("Hello! I am Valentine v2. How can I assist you today?")
+        await update.message.reply_text("Hey! I'm Valentine — your AI assistant. How can I help you today?")
 
     async def _route_message(self, update: Update, content_type: ContentType, text: str, media_path: str = None):
         msg = IncomingMessage(

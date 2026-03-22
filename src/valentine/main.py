@@ -428,7 +428,7 @@ def main():
     signal.signal(signal.SIGINT, handle_sigterm)
     signal.signal(signal.SIGTERM, handle_sigterm)
 
-    logger.info("Valentine v2 process supervisor started.")
+    logger.info("Valentine process supervisor started.")
 
     # Pre-populate Tool Registry with installed skills before agents start
     try:

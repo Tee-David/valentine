@@ -96,6 +96,10 @@ class OracleAgent(BaseAgent):
         # Gather external context
         external_context = ""
 
+        # Include user's name for personalized responses
+        if msg.user_name:
+            external_context += f"\nThe user's name is {msg.user_name}. Use it naturally when appropriate."
+
         # URL fetching
         if "http" in target_prompt:
             urls = [w for w in target_prompt.split() if w.startswith("http")]
