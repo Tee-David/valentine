@@ -25,6 +25,9 @@ from valentine.models import (
     MessageSource, RoutingDecision, TaskResult,
 )
 from valentine.nexus.adapter import PlatformAdapter
+from valentine.security import (
+    sanitise_input, detect_injection, validate_media_extension,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,9 +58,26 @@ class TelegramAdapter(PlatformAdapter):
     # ------------------------------------------------------------------
 
     def _setup_handlers(self):
+        # Core commands
         self.app.add_handler(CommandHandler("start", self._cmd_start))
+        self.app.add_handler(CommandHandler("help", self._cmd_help))
+        # Self-awareness
+        self.app.add_handler(CommandHandler("whoami", self._cmd_whoami))
+        self.app.add_handler(CommandHandler("capabilities", self._cmd_capabilities))
+        self.app.add_handler(CommandHandler("status", self._cmd_status))
+        # Agent management
+        self.app.add_handler(CommandHandler("agents", self._cmd_agents))
+        self.app.add_handler(CommandHandler("mode", self._cmd_mode))
+        self.app.add_handler(CommandHandler("skills", self._cmd_skills))
+        self.app.add_handler(CommandHandler("tools", self._cmd_tools))
+        # Scheduling
         self.app.add_handler(CommandHandler("schedule", self._cmd_schedule))
         self.app.add_handler(CommandHandler("jobs", self._cmd_jobs))
+        # Memory & history
+        self.app.add_handler(CommandHandler("memory", self._cmd_memory))
+        self.app.add_handler(CommandHandler("forget", self._cmd_forget))
+        self.app.add_handler(CommandHandler("clear", self._cmd_clear))
+        # Message handlers (must be last)
         self.app.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_text)
         )
@@ -99,9 +119,176 @@ class TelegramAdapter(PlatformAdapter):
     # ------------------------------------------------------------------
 
     async def _cmd_start(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        from valentine.identity import PRODUCT_NAME, CODENAME, COMPANY_NAME, CEO_NAME
         await update.message.reply_text(
-            "Hello! I'm Valentine v2 — your multi-agent AI assistant. Send me anything."
+            f"Hey! I'm {PRODUCT_NAME} ({CODENAME}) — your multi-agent AI assistant, "
+            f"built by {COMPANY_NAME} under the leadership of {CEO_NAME}.\n\n"
+            "Send me anything — text, photos, voice, documents.\n"
+            "Type /help to see all available commands."
         )
+
+    async def _cmd_help(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        await update.message.reply_text(
+            "Available commands:\n\n"
+            "Identity & Info:\n"
+            "  /whoami — Who am I? My identity and origins\n"
+            "  /capabilities — Everything I can do\n"
+            "  /status — System health and uptime\n\n"
+            "Agent Management:\n"
+            "  /agents — List all active agents\n"
+            "  /mode — Show current autonomy mode\n"
+            "  /mode <supervised|full|readonly> — Change mode\n"
+            "  /skills — List installed skills\n"
+            "  /tools — List available MCP tools\n\n"
+            "Scheduling:\n"
+            "  /schedule <interval> <task> — Create a recurring task\n"
+            "  /jobs — List scheduled jobs\n\n"
+            "Memory:\n"
+            "  /memory <query> — Search my memory\n"
+            "  /forget <query> — Remove a memory\n"
+            "  /clear — Clear conversation history\n\n"
+            "Or just send me a message — I'll figure out the rest."
+        )
+
+    async def _cmd_whoami(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        from valentine.identity import (
+            PRODUCT_NAME, VERSION, CODENAME, COMPANY_NAME,
+            CEO_NAME, CEO_ROLE, ARCHITECTURE_SUMMARY, PERSONALITY_TAGLINE,
+        )
+        await update.message.reply_text(
+            f"I am {PRODUCT_NAME} v{VERSION} ({CODENAME})\n\n"
+            f"Built by: {COMPANY_NAME}\n"
+            f"Led by: {CEO_NAME} — {CEO_ROLE}\n\n"
+            f"Architecture: {ARCHITECTURE_SUMMARY}\n\n"
+            f"Personality: {PERSONALITY_TAGLINE}"
+        )
+
+    async def _cmd_capabilities(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        from valentine.identity import CAPABILITIES
+        lines = [f"  {name}: {desc}" for name, desc in CAPABILITIES.items()]
+        await update.message.reply_text(
+            "Here's everything I can do:\n\n" + "\n".join(lines)
+        )
+
+    async def _cmd_status(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Show system health by querying the health endpoint."""
+        import httpx
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get("http://127.0.0.1:8080/health")
+                data = resp.json()
+                status = data.get("status", "unknown")
+                agents = data.get("agents", {})
+                agent_lines = [
+                    f"  {name}: {'up' if s == 'up' else 'DOWN'}"
+                    for name, s in sorted(agents.items())
+                ]
+                await update.message.reply_text(
+                    f"System: {status.upper()}\n\n"
+                    "Processes:\n" + "\n".join(agent_lines)
+                )
+        except Exception as e:
+            await update.message.reply_text(f"Could not fetch status: {e}")
+
+    async def _cmd_agents(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        from valentine.models import AgentName
+        agent_descriptions = {
+            "zeroclaw": "Router — analyses messages and routes to the right agent",
+            "oracle": "Chat — general conversation, Q&A, web search",
+            "codesmith": "Engineer — code, shell commands, DevOps, skills",
+            "iris": "Vision — image analysis and generation",
+            "echo": "Voice — transcription and text-to-speech",
+            "cortex": "Memory — persistent knowledge storage",
+            "nexus": "Tools — external API integrations",
+            "browser": "Browser — headless web browsing and scraping",
+        }
+        lines = [
+            f"  {name}: {agent_descriptions.get(name, '')}"
+            for name in [a.value for a in AgentName]
+        ]
+        await update.message.reply_text(
+            "Active agents:\n\n" + "\n".join(lines)
+        )
+
+    async def _cmd_mode(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Show or change autonomy mode."""
+        from valentine.config import settings
+        text = update.message.text.replace("/mode", "").strip().lower()
+        if text in ("supervised", "full", "readonly"):
+            settings.autonomy_mode = text
+            await update.message.reply_text(f"Autonomy mode changed to: {text}")
+        else:
+            await update.message.reply_text(
+                f"Current mode: {settings.autonomy_mode}\n\n"
+                "Modes:\n"
+                "  supervised — I ask before dangerous actions\n"
+                "  full — I execute everything without asking\n"
+                "  readonly — I can only read, not write or execute\n\n"
+                "Change: /mode <supervised|full|readonly>"
+            )
+
+    async def _cmd_skills(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """List installed skills."""
+        from valentine.skills.manager import SkillsManager
+        manager = SkillsManager(settings.skills_dir, settings.skills_builtin_dir)
+        manifests = manager.discover_all()
+        if not manifests:
+            await update.message.reply_text("No skills installed.")
+            return
+        lines = [
+            f"  {m.name}: {m.description or '(no description)'}"
+            for m in manifests
+        ]
+        await update.message.reply_text(
+            f"Installed skills ({len(manifests)}):\n\n" + "\n".join(lines)
+        )
+
+    async def _cmd_tools(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """List available MCP tools from the shared registry."""
+        from valentine.tools.registry import ToolRegistry
+        registry = ToolRegistry()
+        try:
+            tools = await registry.list_tools()
+            if not tools:
+                await update.message.reply_text(
+                    "No MCP tools registered. Configure MCP servers in .env."
+                )
+                return
+            lines = [f"  {t.name}: {t.description}" for t in tools]
+            await update.message.reply_text(
+                f"Available tools ({len(tools)}):\n\n" + "\n".join(lines)
+            )
+        finally:
+            await registry.close()
+
+    async def _cmd_memory(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Search Valentine's memory."""
+        query = update.message.text.replace("/memory", "").strip()
+        if not query:
+            await update.message.reply_text("Usage: /memory <search query>")
+            return
+        # Route to Cortex for memory search
+        await self._route(update, ContentType.TEXT, f"search my memory for: {query}")
+
+    async def _cmd_forget(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Delete a memory."""
+        query = update.message.text.replace("/forget", "").strip()
+        if not query:
+            await update.message.reply_text("Usage: /forget <what to forget>")
+            return
+        await self._route(update, ContentType.TEXT, f"forget this memory: {query}")
+
+    async def _cmd_clear(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Clear conversation history for this chat."""
+        chat_id = str(update.effective_chat.id)
+        try:
+            await self.bus.clear_history(chat_id)
+            await update.message.reply_text(
+                "Conversation history cleared. I still remember things "
+                "from long-term memory — use /forget to remove those."
+            )
+        except Exception as e:
+            await update.message.reply_text(f"Failed to clear history: {e}")
 
     async def _cmd_schedule(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Handle /schedule command to create scheduled tasks."""
@@ -137,6 +324,20 @@ class TelegramAdapter(PlatformAdapter):
         text: str,
         media_path: str | None = None,
     ):
+        # --- Input sanitisation ---
+        text = sanitise_input(text) if text else text
+
+        # Log (but don't block) injection attempts — the agent prompts are
+        # hardened to resist them, so we let them through with a flag.
+        injection_flagged = False
+        if text and detect_injection(text):
+            logger.warning(
+                "Prompt injection attempt from user %s in chat %s",
+                update.effective_user.id,
+                update.effective_chat.id,
+            )
+            injection_flagged = True
+
         msg = IncomingMessage(
             message_id=str(update.message.message_id),
             user_id=str(update.effective_user.id),
@@ -273,6 +474,10 @@ class TelegramAdapter(PlatformAdapter):
     async def download_media(self, file_ref: Any) -> str:
         tg_file = await file_ref.get_file()
         ext = _guess_extension(tg_file.file_path or "")
+        # Validate file extension
+        if ext and not validate_media_extension(f"file{ext}"):
+            logger.warning("Rejected media with disallowed extension: %s", ext)
+            raise ValueError(f"File type '{ext}' is not supported.")
         local_path = f"/tmp/{tg_file.file_id}{ext}"
         await tg_file.download_to_drive(custom_path=local_path)
         logger.info(f"Downloaded media → {local_path}")

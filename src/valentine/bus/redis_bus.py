@@ -137,6 +137,18 @@ class RedisBus:
             history.append(json.loads(item))
         return history
 
+    async def clear_history(self, chat_id: str, session_id: str | None = None):
+        """Delete conversation history for a chat's active session."""
+        if session_id is None:
+            session_id = await self.get_active_session(chat_id)
+
+        if session_id == "default":
+            key = f"chat:{chat_id}:history"
+        else:
+            key = f"chat:{chat_id}:session:{session_id}:history"
+
+        await self.redis.delete(key)
+
     # --- Session / Threading Support ---
     # Allows multiple conversation threads per chat (e.g., "Project Alpha", "General")
     # Default session is "default" for backward compatibility.

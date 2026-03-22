@@ -12,6 +12,7 @@ from valentine.bus.redis_bus import RedisBus
 from valentine.config import settings
 from valentine.models import AgentName, AgentTask, TaskResult, ContentType
 from valentine.llm import LLMProvider
+from valentine.security import sanitise_output
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,11 @@ class BaseAgent(abc.ABC):
         pass
 
     async def publish_result(self, result: TaskResult):
+        # Scrub any accidentally leaked secrets before publishing
+        if result.text:
+            result.text = sanitise_output(result.text)
+        if result.error:
+            result.error = sanitise_output(result.error)
         # Write to the agent's result stream (for persistence / chaining)
         await self.bus.add_task(self.result_stream, result.to_dict())
         # Also publish to pub/sub so the Telegram bot (or other adapters) receive it

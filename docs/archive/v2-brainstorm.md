@@ -1,5 +1,0 @@
-I want us to use zero-claw (main orchestrator) + quen 32b + mem0 + free apis (groq + cerebras + sambanova).
-I want Valentine to be able to process image, code, voice messages, cli, mcp, image generation and npm install etc all those stuff. It should be fast reliable and always online. Tell me what you'll need.
-Look at the oracle requirements if we can make it smalleer while still getting the best of the ai agents.
-I want my zeroclaw to have subagents for the more (to-be constantly used features); this way my agent won't be the one doing the heavy lifting all the time; it's job is to parse intent and route tasks to specialized sub-agents running in the background; sharing a common workspace for data. This way, if we scale we are okay (tell me what you think about this direction). The agents would be very niche to their tasks and familiar so they can handle whatever pat they are assigned to well and not just one agent doing everything.
-i have currently 1gb ocpu and 6gb ram and 50gb boot volume (is it good enough)
