@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Valentine v2 — Deployment Script
+# Valentine — Deployment Script
 # Usage: ./scripts/deploy.sh [--install | --update | --status]
 
 APP_DIR="/opt/valentine"
@@ -40,7 +40,7 @@ start_services() {
 }
 
 install_app() {
-    info "Installing Valentine v2..."
+    info "Installing Valentine..."
     check_deps
 
     # Create venv if missing
@@ -72,7 +72,7 @@ install_app() {
 }
 
 update_app() {
-    info "Updating Valentine v2..."
+    info "Updating Valentine..."
     cd "$APP_DIR"
     git pull --ff-only
     $PIP install -e .

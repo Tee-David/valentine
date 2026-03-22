@@ -71,6 +71,9 @@ class Settings(BaseSettings):
     # GitHub PAT (for MCP GitHub server)
     github_token: str = Field(default="")
 
+    # Admin — Telegram user ID(s) allowed to run privileged commands (/restart, /mode, etc.)
+    admin_user_ids: list[str] = Field(default_factory=list)
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 

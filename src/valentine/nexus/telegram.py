@@ -77,6 +77,8 @@ class TelegramAdapter(PlatformAdapter):
         self.app.add_handler(CommandHandler("memory", self._cmd_memory))
         self.app.add_handler(CommandHandler("forget", self._cmd_forget))
         self.app.add_handler(CommandHandler("clear", self._cmd_clear))
+        # Admin
+        self.app.add_handler(CommandHandler("restart", self._cmd_restart))
         # Message handlers (must be last)
         self.app.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_text)
@@ -116,6 +118,7 @@ class TelegramAdapter(PlatformAdapter):
             BotCommand("memory", "Search my memory"),
             BotCommand("forget", "Remove a memory"),
             BotCommand("clear", "Clear conversation history"),
+            BotCommand("restart", "Restart Valentine (admin only)"),
         ])
         logger.info("Registered Telegram bot commands.")
 
@@ -168,6 +171,8 @@ class TelegramAdapter(PlatformAdapter):
             "  /memory <query> — Search my memory\n"
             "  /forget <query> — Remove a memory\n"
             "  /clear — Clear conversation history\n\n"
+            "Admin:\n"
+            "  /restart — Pull latest code and restart (admin only)\n\n"
             "Or just send me a message — I'll figure out the rest."
         )
 
@@ -310,6 +315,60 @@ class TelegramAdapter(PlatformAdapter):
             )
         except Exception as e:
             await update.message.reply_text(f"Failed to clear history: {e}")
+
+    def _is_admin(self, user_id: int | str) -> bool:
+        """Check if a user is an admin. If no admins configured, allow all."""
+        admin_ids = settings.admin_user_ids
+        if not admin_ids:
+            return True  # no restriction if not configured
+        return str(user_id) in admin_ids
+
+    async def _cmd_restart(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Restart Valentine (admin only). Pulls latest code, then restarts the service."""
+        if not self._is_admin(update.effective_user.id):
+            await update.message.reply_text("Sorry, only admins can restart Valentine.")
+            return
+
+        import subprocess
+
+        await update.message.reply_text("Pulling latest code and restarting... 🔄")
+
+        # Pull latest code
+        try:
+            pull_result = subprocess.run(
+                ["git", "-C", "/opt/valentine", "pull", "--ff-only"],
+                capture_output=True, text=True, timeout=30,
+            )
+            if pull_result.returncode == 0:
+                pull_msg = pull_result.stdout.strip() or "Already up to date."
+            else:
+                pull_msg = f"Git pull failed: {pull_result.stderr.strip()}"
+            await update.message.reply_text(f"Git: {pull_msg}")
+        except Exception as e:
+            await update.message.reply_text(f"Git pull error: {e}")
+
+        # Reinstall package to pick up code changes
+        try:
+            subprocess.run(
+                ["/opt/valentine/venv/bin/pip", "install", "-e", "/opt/valentine"],
+                capture_output=True, text=True, timeout=60,
+            )
+        except Exception:
+            pass  # non-fatal, restart anyway
+
+        await update.message.reply_text("Restarting service... I'll be back shortly! ✨")
+        await asyncio.sleep(1)
+
+        # Restart via systemd — this kills our own process, systemd respawns everything
+        try:
+            subprocess.Popen(
+                ["sudo", "systemctl", "restart", "valentine"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except Exception as e:
+            # Fallback: kill our own process tree so systemd restart-on-failure kicks in
+            import os, signal
+            os.kill(1, signal.SIGTERM)  # last resort
 
     async def _cmd_schedule(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Handle /schedule command to create scheduled tasks."""
