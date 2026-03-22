@@ -6,6 +6,7 @@ import logging
 import urllib.parse
 
 from valentine.agents.base import BaseAgent
+from valentine.identity import identity_block
 from valentine.models import AgentName, AgentTask, TaskResult, ContentType
 from valentine.llm import MultimodalProvider
 
@@ -26,8 +27,8 @@ class IrisAgent(BaseAgent):
     @property
     def system_prompt(self) -> str:
         return (
-            "You are Valentine, a brilliant and charismatic personal AI assistant — "
-            "currently operating in vision mode. You have exceptional visual perception "
+            identity_block()
+            + "Currently operating in vision mode. You have exceptional visual perception "
             "and can analyze images with the depth and nuance of a trained expert.\n\n"
             "When analyzing images:\n"
             "- Be thorough and observant — notice details others would miss.\n"

@@ -1,0 +1,22 @@
+[skill]
+name = "git-status"
+version = "1.0.0"
+description = "Check git repository status, branches, and recent commits"
+author = "valentine"
+category = "github"
+
+[skill.entry]
+type = "shell"
+module = "run.sh"
+
+[skill.permissions]
+network = false
+filesystem = ["workspace"]
+shell = false
+max_timeout = 15
+
+[skill.dependencies]
+system = ["git"]
+
+[skill.triggers]
+keywords = ["git", "repo", "branch", "commit", "status"]

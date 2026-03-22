@@ -29,6 +29,7 @@ class AgentName(str, Enum):
     ECHO = "echo"
     CORTEX = "cortex"
     NEXUS = "nexus"
+    BROWSER = "browser"
 
 
 class Priority(str, Enum):
@@ -144,6 +145,7 @@ class TaskResult:
     content_type: ContentType = ContentType.TEXT
     text: str | None = None
     media_path: str | None = None
+    file_name: str | None = None  # human-readable filename for downloads
     error: str | None = None
     chat_id: str | None = None
     processing_time_ms: int = 0
@@ -156,6 +158,7 @@ class TaskResult:
             "content_type": self.content_type.value,
             "text": self.text,
             "media_path": self.media_path,
+            "file_name": self.file_name,
             "error": self.error,
             "chat_id": self.chat_id,
             "processing_time_ms": self.processing_time_ms,
@@ -170,6 +173,7 @@ class TaskResult:
             content_type=ContentType(data.get("content_type", "text")),
             text=data.get("text"),
             media_path=data.get("media_path"),
+            file_name=data.get("file_name"),
             error=data.get("error"),
             chat_id=data.get("chat_id"),
             processing_time_ms=data.get("processing_time_ms", 0),

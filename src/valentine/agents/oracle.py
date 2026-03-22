@@ -9,13 +9,14 @@ from typing import List
 from duckduckgo_search import DDGS
 
 from valentine.agents.base import BaseAgent
+from valentine.identity import identity_block
 from valentine.models import AgentName, AgentTask, TaskResult
 
 logger = logging.getLogger(__name__)
 
 
 class OracleAgent(BaseAgent):
-    def __init__(self, llm, bus):
+    def __init__(self, llm, bus, mcp_manager=None):
         super().__init__(
             name=AgentName.ORACLE,
             llm=llm,
@@ -23,13 +24,13 @@ class OracleAgent(BaseAgent):
             consumer_group="oracle_workers",
             consumer_name="oracle_1",
         )
+        self.mcp_manager = mcp_manager
 
     @property
     def system_prompt(self) -> str:
         return (
-            "You are Valentine, a brilliant and charismatic personal AI assistant. "
-            "You're warm, witty, confident, and genuinely helpful — like a best friend "
-            "who happens to be the smartest person in the room. You have personality and "
+            identity_block()
+            + "You're warm, witty, confident, and genuinely helpful. You have personality and "
             "opinions. You remember what was said earlier in the conversation and build on it.\n\n"
             "Guidelines:\n"
             "- Be conversational and natural, never robotic or generic.\n"
@@ -38,7 +39,9 @@ class OracleAgent(BaseAgent):
             "- When given search results, synthesize them into a natural answer with sources.\n"
             "- If continuing a game or activity, stay in character and keep playing.\n"
             "- Never say 'I'm just an AI' or 'I'm functioning within normal parameters.'\n"
-            "- You are Valentine. Own it."
+            "- You are Valentine. Own it.\n"
+            "- If you have access to external tools, you can use them to enhance your research. "
+            "Available tools will be listed in the context."
         )
 
     async def _search_web(self, query: str) -> str:

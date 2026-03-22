@@ -4,6 +4,7 @@ from __future__ import annotations
 import redis.asyncio as redis
 import json
 import logging
+import time
 from typing import Dict, Any, AsyncGenerator, List, Tuple
 
 from valentine.config import settings
@@ -102,17 +103,32 @@ class RedisBus:
 
     MAX_HISTORY = 20  # last 10 turns (user + assistant)
 
-    async def append_history(self, chat_id: str, role: str, content: str):
-        """Push a message onto the chat's conversation history."""
-        key = f"chat:{chat_id}:history"
+    async def append_history(self, chat_id: str, role: str, content: str, session_id: str | None = None):
+        """Push a message onto the chat's conversation history for the active session."""
+        if session_id is None:
+            session_id = await self.get_active_session(chat_id)
+
+        if session_id == "default":
+            # Backward compatible: use old key format
+            key = f"chat:{chat_id}:history"
+        else:
+            key = f"chat:{chat_id}:session:{session_id}:history"
+
         entry = json.dumps({"role": role, "content": content})
         await self.redis.rpush(key, entry)
         await self.redis.ltrim(key, -self.MAX_HISTORY, -1)
-        await self.redis.expire(key, 86400)  # 24h TTL
+        await self.redis.expire(key, 86400 * 7)  # 7 day TTL for sessions
 
-    async def get_history(self, chat_id: str) -> list[dict[str, str]]:
-        """Return the conversation history for a chat."""
-        key = f"chat:{chat_id}:history"
+    async def get_history(self, chat_id: str, session_id: str | None = None) -> list[dict[str, str]]:
+        """Return the conversation history for a chat's active session."""
+        if session_id is None:
+            session_id = await self.get_active_session(chat_id)
+
+        if session_id == "default":
+            key = f"chat:{chat_id}:history"
+        else:
+            key = f"chat:{chat_id}:session:{session_id}:history"
+
         raw = await self.redis.lrange(key, 0, -1)
         history = []
         for item in raw:
@@ -120,3 +136,60 @@ class RedisBus:
                 item = item.decode("utf-8")
             history.append(json.loads(item))
         return history
+
+    # --- Session / Threading Support ---
+    # Allows multiple conversation threads per chat (e.g., "Project Alpha", "General")
+    # Default session is "default" for backward compatibility.
+
+    async def create_session(self, chat_id: str, session_name: str) -> str:
+        """Create a new conversation session. Returns session_id."""
+        import uuid
+        session_id = uuid.uuid4().hex[:8]
+        key = f"chat:{chat_id}:sessions"
+        session_data = json.dumps({
+            "id": session_id,
+            "name": session_name,
+            "created": time.time(),
+        })
+        await self.redis.hset(key, session_id, session_data)
+        # Set this as the active session
+        await self.redis.set(f"chat:{chat_id}:active_session", session_id)
+        return session_id
+
+    async def list_sessions(self, chat_id: str) -> list[dict]:
+        """List all sessions for a chat."""
+        key = f"chat:{chat_id}:sessions"
+        raw = await self.redis.hgetall(key)
+        sessions = []
+        for data in raw.values():
+            if isinstance(data, bytes):
+                data = data.decode("utf-8")
+            sessions.append(json.loads(data))
+        return sorted(sessions, key=lambda s: s.get("created", 0))
+
+    async def switch_session(self, chat_id: str, session_id: str) -> bool:
+        """Switch active session for a chat."""
+        key = f"chat:{chat_id}:sessions"
+        exists = await self.redis.hexists(key, session_id)
+        if exists:
+            await self.redis.set(f"chat:{chat_id}:active_session", session_id)
+            return True
+        return False
+
+    async def get_active_session(self, chat_id: str) -> str:
+        """Get the active session ID for a chat. Returns 'default' if none."""
+        session_id = await self.redis.get(f"chat:{chat_id}:active_session")
+        if session_id:
+            if isinstance(session_id, bytes):
+                session_id = session_id.decode("utf-8")
+            return session_id
+        return "default"
+
+    async def delete_session(self, chat_id: str, session_id: str) -> bool:
+        """Delete a session and its history."""
+        key = f"chat:{chat_id}:sessions"
+        removed = await self.redis.hdel(key, session_id)
+        # Also clear the session's history
+        history_key = f"chat:{chat_id}:session:{session_id}:history"
+        await self.redis.delete(history_key)
+        return removed > 0

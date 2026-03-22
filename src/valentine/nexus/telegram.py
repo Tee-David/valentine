@@ -56,6 +56,8 @@ class TelegramAdapter(PlatformAdapter):
 
     def _setup_handlers(self):
         self.app.add_handler(CommandHandler("start", self._cmd_start))
+        self.app.add_handler(CommandHandler("schedule", self._cmd_schedule))
+        self.app.add_handler(CommandHandler("jobs", self._cmd_jobs))
         self.app.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_text)
         )
@@ -100,6 +102,33 @@ class TelegramAdapter(PlatformAdapter):
         await update.message.reply_text(
             "Hello! I'm Valentine v2 — your multi-agent AI assistant. Send me anything."
         )
+
+    async def _cmd_schedule(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Handle /schedule command to create scheduled tasks."""
+        text = update.message.text.replace("/schedule", "").strip()
+        if not text:
+            await update.message.reply_text(
+                "Usage: /schedule <interval> <task>\n"
+                "Examples:\n"
+                "  /schedule every 1h check server health\n"
+                "  /schedule daily summarize AI news\n"
+                "  /schedule every 10m monitor website status"
+            )
+            return
+        # Route through ZeroClaw with schedule intent
+        await self._route(update, ContentType.TEXT, f"/schedule {text}")
+
+    async def _cmd_jobs(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Handle /jobs command to list scheduled jobs."""
+        from valentine.core.scheduler import Scheduler
+        scheduler = Scheduler()
+        try:
+            jobs_text = await scheduler.format_jobs_list(
+                str(update.effective_chat.id)
+            )
+            await update.message.reply_text(jobs_text)
+        finally:
+            await scheduler.close()
 
     async def _route(
         self,
@@ -215,10 +244,13 @@ class TelegramAdapter(PlatformAdapter):
                     voice=open(result.media_path, "rb"),
                 )
             elif result.content_type == ContentType.DOCUMENT and result.media_path:
+                # Use file_name from result if available for better UX
+                filename = result.file_name or os.path.basename(result.media_path)
                 await self._send_with_retry(
                     self.app.bot.send_document,
                     chat_id=result.chat_id,
                     document=open(result.media_path, "rb"),
+                    filename=filename,
                     caption=(result.text or "")[:1024],
                 )
             else:

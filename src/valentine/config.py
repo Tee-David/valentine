@@ -52,6 +52,25 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = Field(default="INFO")
 
+    # MCP Server Configuration
+    # Format: {"server_name": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": {"KEY": "val"}}}
+    mcp_servers: dict = Field(default_factory=dict)
+
+    # Autonomy Mode: "supervised" | "full" | "readonly"
+    autonomy_mode: str = Field(default="supervised")
+    autonomy_dangerous_commands: list[str] = Field(default_factory=lambda: [
+        "rm", "rmdir", "mkfs", "dd", "shutdown", "reboot", "kill",
+        "git push", "git push --force", "docker rm", "docker rmi",
+    ])
+
+    # Enhanced Skills
+    skills_git_sources: list[str] = Field(default_factory=list)
+    skills_allow_network: bool = Field(default=False)
+    skills_max_timeout: int = Field(default=60)
+
+    # GitHub PAT (for MCP GitHub server)
+    github_token: str = Field(default="")
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 

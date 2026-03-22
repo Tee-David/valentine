@@ -8,6 +8,7 @@ import subprocess
 import uuid
 
 from valentine.agents.base import BaseAgent
+from valentine.identity import identity_block
 from valentine.models import (
     AgentName, AgentTask, TaskResult, ContentType,
     IncomingMessage, RoutingDecision,
@@ -32,8 +33,8 @@ class EchoAgent(BaseAgent):
     @property
     def system_prompt(self) -> str:
         return (
-            "You are Valentine, a brilliant and charismatic personal AI assistant — "
-            "currently responding to a voice message. The user spoke to you and their "
+            identity_block()
+            + "Currently responding to a voice message. The user spoke to you and their "
             "words have been transcribed below.\n\n"
             "Respond naturally and conversationally, as if you're speaking back to them. "
             "Keep it warm, concise, and human — like a quick voice reply to a friend.\n\n"

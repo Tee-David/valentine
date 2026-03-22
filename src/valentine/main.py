@@ -55,6 +55,7 @@ AGENT_REGISTRY: dict[str, tuple[str, Any]] = {
     "iris":      ("valentine.agents.iris",           "IrisAgent",       _make_sambanova),
     "echo":      ("valentine.agents.echo",           "EchoAgent",       _make_groq),
     "nexus":     ("valentine.agents.nexus",          "NexusAgent",      _make_primary_chain),
+    "browser":   ("valentine.agents.browser",        "BrowserAgent",    _make_primary_chain),
 }
 
 
@@ -126,6 +127,167 @@ def _run_bot_process():
         sys.exit(1)
 
 
+def _run_mcp_bridge_process():
+    """Entry point for the MCP bridge subprocess.
+
+    Connects to all configured MCP servers, registers discovered tools in the
+    shared Tool Registry, and proxies tool-call requests from agents via a
+    Redis stream.
+    """
+    from valentine.mcp.client import MCPManager
+    from valentine.tools.registry import ToolRegistry, ToolDefinition
+
+    async def run():
+        if not settings.mcp_servers:
+            logger.info("No MCP servers configured. MCP bridge idle.")
+            # Stay alive so the supervisor doesn't restart us in a loop.
+            await asyncio.Event().wait()
+            return
+
+        mcp = MCPManager()
+        registry = ToolRegistry()
+        bus = _make_bus()
+
+        try:
+            # Connect to all MCP servers and discover tools
+            tools = await mcp.start(settings.mcp_servers)
+            logger.info(
+                "MCP bridge discovered %d tools from %d servers",
+                len(tools),
+                len(settings.mcp_servers),
+            )
+
+            # Register in shared Tool Registry
+            for tool in tools:
+                await registry.register(tool)
+
+            # Listen for tool call requests from agents
+            stream = "valentine:mcp:requests"
+            group = "mcp_bridge"
+            consumer = "bridge_1"
+
+            try:
+                await bus.redis.xgroup_create(stream, group, mkstream=True)
+            except Exception as e:
+                if "BUSYGROUP" not in str(e):
+                    raise
+
+            logger.info("MCP bridge listening for tool call requests...")
+            while True:
+                try:
+                    result = await bus.redis.xreadgroup(
+                        group, consumer, {stream: ">"}, count=1, block=1000,
+                    )
+                    if not result:
+                        continue
+
+                    for _, messages in result:
+                        for msg_id, data in messages:
+                            payload_raw = data.get(b"payload") or data.get("payload")
+                            if not payload_raw:
+                                continue
+                            request = json.loads(payload_raw)
+
+                            call_id = request["call_id"]
+                            server_name = request["server_name"]
+                            tool_name = request["tool_name"]
+                            arguments = request.get("arguments", {})
+
+                            try:
+                                output = await mcp.call_tool(
+                                    server_name, tool_name, arguments,
+                                )
+                                response = {
+                                    "call_id": call_id,
+                                    "success": True,
+                                    "output": output,
+                                }
+                            except Exception as e:
+                                response = {
+                                    "call_id": call_id,
+                                    "success": False,
+                                    "error": str(e),
+                                }
+
+                            # Publish result back for the requesting agent
+                            result_key = f"valentine:mcp:results:{call_id}"
+                            await bus.redis.rpush(result_key, json.dumps(response))
+                            await bus.redis.expire(result_key, 120)
+
+                            await bus.redis.xack(stream, group, msg_id)
+
+                except Exception as e:
+                    logger.error("MCP bridge error: %s", e)
+                    await asyncio.sleep(1)
+        finally:
+            await mcp.shutdown()
+            await registry.close()
+            await bus.close()
+
+    try:
+        logging.basicConfig(
+            level=settings.log_level,
+            format="%(asctime)s - %(processName)s - %(name)s - %(levelname)s - %(message)s",
+        )
+        asyncio.run(run())
+    except KeyboardInterrupt:
+        pass
+    except Exception as e:
+        logger.exception(f"MCP bridge crashed: {e}")
+        sys.exit(1)
+
+
+def _run_scheduler_process():
+    """Entry point for the scheduler subprocess."""
+    from valentine.core.scheduler import Scheduler
+
+    async def run():
+        scheduler = Scheduler()
+        try:
+            await scheduler.run_loop()
+        finally:
+            await scheduler.close()
+
+    try:
+        logging.basicConfig(
+            level=settings.log_level,
+            format="%(asctime)s - %(processName)s - %(name)s - %(levelname)s - %(message)s",
+        )
+        logger.info("Scheduler process starting...")
+        asyncio.run(run())
+    except KeyboardInterrupt:
+        pass
+    except Exception as e:
+        logger.exception(f"Scheduler crashed: {e}")
+        sys.exit(1)
+
+
+def _init_skills_in_registry():
+    """Pre-populate the Tool Registry with installed skills (runs in main process)."""
+    from valentine.skills.manager import SkillsManager
+    from valentine.tools.registry import ToolRegistry, ToolDefinition
+
+    async def _init():
+        manager = SkillsManager(settings.skills_dir, settings.skills_builtin_dir)
+        manifests = manager.discover_all()
+
+        registry = ToolRegistry()
+        try:
+            for m in manifests:
+                tool = ToolDefinition(
+                    name=f"skill:{m.name}",
+                    description=m.description,
+                    parameters=m.parameters,
+                    source="skill",
+                )
+                await registry.register(tool)
+            logger.info("Registered %d skills in Tool Registry", len(manifests))
+        finally:
+            await registry.close()
+
+    asyncio.run(_init())
+
+
 # ------------------------------------------------------------------
 # Supervisor
 # ------------------------------------------------------------------
@@ -159,6 +321,26 @@ class ProcessSupervisor:
         self.processes["telegram_bot"] = p
         logger.info(f"Spawned telegram bot (PID: {p.pid})")
 
+    def spawn_mcp_bridge(self):
+        p = multiprocessing.Process(
+            target=_run_mcp_bridge_process,
+            name="valentine-mcp-bridge",
+            daemon=True,
+        )
+        p.start()
+        self.processes["mcp_bridge"] = p
+        logger.info(f"Spawned MCP bridge (PID: {p.pid})")
+
+    def spawn_scheduler(self):
+        p = multiprocessing.Process(
+            target=_run_scheduler_process,
+            name="valentine-scheduler",
+            daemon=True,
+        )
+        p.start()
+        self.processes["scheduler"] = p
+        logger.info(f"Spawned scheduler (PID: {p.pid})")
+
     def spawn_all(self):
         for name in AGENT_REGISTRY:
             self.spawn_agent(name)
@@ -170,6 +352,10 @@ class ProcessSupervisor:
                     logger.warning(f"{name} (PID {p.pid}) died. Restarting...")
                     if name == "telegram_bot":
                         self.spawn_bot()
+                    elif name == "mcp_bridge":
+                        self.spawn_mcp_bridge()
+                    elif name == "scheduler":
+                        self.spawn_scheduler()
                     else:
                         self.spawn_agent(name)
             time.sleep(5)
@@ -243,8 +429,17 @@ def main():
     signal.signal(signal.SIGTERM, handle_sigterm)
 
     logger.info("Valentine v2 process supervisor started.")
+
+    # Pre-populate Tool Registry with installed skills before agents start
+    try:
+        _init_skills_in_registry()
+    except Exception as e:
+        logger.warning("Skills registry init failed (non-fatal): %s", e)
+
     supervisor.spawn_all()
     supervisor.spawn_bot()
+    supervisor.spawn_mcp_bridge()
+    supervisor.spawn_scheduler()
 
     health_server = _start_health_server(supervisor)
 

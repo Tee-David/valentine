@@ -6,13 +6,14 @@ import logging
 from typing import List
 
 from valentine.agents.base import BaseAgent
+from valentine.identity import internal_identity_block
 from valentine.models import AgentName, AgentTask, TaskResult, RoutingDecision, IncomingMessage, ContentType
 
 logger = logging.getLogger(__name__)
 
 
 class ZeroClawRouter(BaseAgent):
-    def __init__(self, llm, bus):
+    def __init__(self, llm, bus, tool_registry=None):
         super().__init__(
             name=AgentName.ZEROCLAW,
             llm=llm,
@@ -21,10 +22,21 @@ class ZeroClawRouter(BaseAgent):
             consumer_name="zeroclaw_1",
         )
         self.task_stream = self.bus.ROUTER_STREAM
+        self.tool_registry = tool_registry
+        self._tool_summary = ""
 
     @property
     def system_prompt(self) -> str:
-        return """You are ZeroClaw, the Master Orchestrator.
+        tools_section = ""
+        if self.tool_registry and self._tool_summary:
+            tools_section = (
+                "\n\nAVAILABLE TOOLS (can be used by agents):\n"
+                + self._tool_summary
+            )
+
+        return (
+            internal_identity_block()
+            + """You are ZeroClaw, the Master Orchestrator.
 Your ONLY job is to analyze each incoming user message and decide which sub-agent should handle it.
 
 Available Agents:
@@ -41,18 +53,26 @@ Available Agents:
    - The user asks to GENERATE/CREATE/MAKE an image
    - The user asks for OCR or screenshot analysis
 4. "echo" — Voice/audio ONLY. Use when content_type is "voice".
+5. "browser" — Web browsing, page scraping, website interaction. Use when:
+   - The user wants to scrape/extract data from a website
+   - The user wants to navigate a web page and interact with it
+   - The user needs JavaScript-rendered content (not just raw HTML)
+   - The user asks to take a screenshot of a webpage
 
 RULES:
 - If content_type is "photo" → ALWAYS route to "iris", regardless of text.
 - If content_type is "voice" → ALWAYS route to "echo".
 - If the user asks to generate/create/make an image → route to "iris".
 - GitHub, git, deploy, server, skills, shell → route to "codesmith".
+- Website scraping, page interaction, JS-rendered content → route to "browser".
 - If unsure → route to "oracle".
 
 Output ONLY valid JSON:
-{"intent": "short description", "agent": "oracle|codesmith|iris|echo", "priority": "normal", "chain": []}
+{"intent": "short description", "agent": "oracle|codesmith|iris|echo|browser", "priority": "normal", "chain": [], "params": {"tool": "tool_name"}}
 
 No markdown. No explanation. JSON only."""
+            + tools_section
+        )
 
     async def publish_result(self, result: TaskResult):
         # ZeroClaw results are internal — don't broadcast to the bot

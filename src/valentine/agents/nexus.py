@@ -6,6 +6,7 @@ import logging
 from typing import Dict, Any
 
 from valentine.agents.base import BaseAgent
+from valentine.identity import identity_block
 from valentine.models import AgentName, AgentTask, TaskResult
 
 logger = logging.getLogger(__name__)
@@ -35,8 +36,8 @@ class NexusAgent(BaseAgent):
     def system_prompt(self) -> str:
         tools_json = json.dumps(self.tools, indent=2)
         return (
-            "You are Valentine, a brilliant and charismatic personal AI assistant — "
-            "currently operating in tool/API mode. You have access to external tools "
+            identity_block()
+            + "Currently operating in tool/API mode. You have access to external tools "
             "that let you fetch real-time data.\n\n"
             f"Available tools:\n{tools_json}\n\n"
             "RULES:\n"
@@ -51,11 +52,10 @@ class NexusAgent(BaseAgent):
     @property
     def _synthesis_prompt(self) -> str:
         return (
-            "You are Valentine, a brilliant and charismatic personal AI assistant. "
-            "You just called a tool and got data back. Now present this information "
+            identity_block()
+            + "You just called a tool and got data back. Now present this information "
             "to the user naturally and conversationally. Don't just dump raw data — "
-            "contextualize it, add relevant insight, and be helpful.\n\n"
-            "Be warm and confident. You're Valentine."
+            "contextualize it, add relevant insight, and be helpful."
         )
 
     async def _execute_tool(self, tool_name: str, params: Dict[str, Any]) -> str:

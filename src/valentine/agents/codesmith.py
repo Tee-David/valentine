@@ -8,6 +8,7 @@ import subprocess
 from typing import List
 
 from valentine.agents.base import BaseAgent
+from valentine.identity import identity_block
 from valentine.models import AgentName, AgentTask, TaskResult
 from valentine.config import settings
 
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class CodeSmithAgent(BaseAgent):
-    def __init__(self, llm, bus):
+    def __init__(self, llm, bus, skill_manager=None, mcp_manager=None, autonomy_gate=None):
         super().__init__(
             name=AgentName.CODESMITH,
             llm=llm,
@@ -31,9 +32,35 @@ class CodeSmithAgent(BaseAgent):
             "rm -rf /", "rm -rf /*", "mkfs", "dd if=", "shutdown", "reboot",
             ":(){", "fork bomb", ">(){ :|:& };:",
         ]
+        self.skill_manager = skill_manager
+        self.mcp_manager = mcp_manager
+        self.autonomy_gate = autonomy_gate
 
     def _discover_skills(self) -> str:
-        """Scan installed + built-in skills and return a summary for the LLM."""
+        """Scan installed + built-in skills and return a summary for the LLM.
+
+        Uses the new SkillsManager if available, falling back to the legacy
+        file-system scanner.
+        """
+        if self.skill_manager:
+            if hasattr(self.skill_manager, 'skills_summary'):
+                return self.skill_manager.skills_summary()
+            # SkillsManager doesn't have skills_summary — build from discover_all
+            try:
+                manifests = self.skill_manager.discover_all()
+                if not manifests:
+                    return "  (none installed)"
+                lines = []
+                for m in manifests:
+                    desc = m.description if hasattr(m, 'description') and m.description else ""
+                    lines.append(f"  - {m.name}: {desc}" if desc else f"  - {m.name}")
+                return "\n".join(lines)
+            except Exception:
+                logger.warning("SkillsManager discovery failed, falling back to legacy scanner")
+        return self._legacy_discover_skills()
+
+    def _legacy_discover_skills(self) -> str:
+        """Legacy skill discovery: scan .sh files in skills directories."""
         skills = []
         for d in (self.skills_dir, self.skills_builtin_dir):
             if not os.path.isdir(d):
@@ -58,9 +85,27 @@ class CodeSmithAgent(BaseAgent):
     @property
     def system_prompt(self) -> str:
         skills_list = self._discover_skills()
+
+        # Build MCP tools section if available
+        mcp_section = ""
+        if self.mcp_manager:
+            try:
+                all_tools = self.mcp_manager.list_all_tools()
+                if all_tools:
+                    tool_lines = []
+                    for t in all_tools:
+                        tool_lines.append(f"  - {t.name}: {t.description}")
+                    mcp_section = (
+                        "\n\nMCP TOOLS (external tool integrations):\n"
+                        + "\n".join(tool_lines)
+                        + '\nTo use an MCP tool: {{"action": "mcp_tool", "name": "tool_name", "args": {{...}}}}\n'
+                    )
+            except Exception:
+                logger.warning("Failed to list MCP tools for system prompt")
+
         return (
-            "You are Valentine, a brilliant and charismatic personal AI assistant — "
-            "currently operating in engineering mode. You're a world-class full-stack "
+            identity_block()
+            + "Currently operating in engineering mode. You're a world-class full-stack "
             "developer, DevOps engineer, and systems architect. You write clean, "
             "production-quality code and explain your thinking clearly.\n\n"
             "You have access to a sandboxed workspace where you can execute shell commands "
@@ -71,14 +116,16 @@ class CodeSmithAgent(BaseAgent):
             f"Built-in skills: {self.skills_builtin_dir}\n"
             "To run a skill: {{\"action\": \"skill\", \"name\": \"skill-name\", \"args\": \"subcommand arg1 arg2\"}}\n"
             "To install a skill: {{\"action\": \"skill_install\", \"name\": \"skill-name\"}}\n"
-            "To list skills: {{\"action\": \"skill_list\"}}\n\n"
-            "RESPONSE FORMAT — respond with a JSON array of actions:\n"
+            "To list skills: {{\"action\": \"skill_list\"}}\n"
+            + mcp_section +
+            "\nRESPONSE FORMAT — respond with a JSON array of actions:\n"
             '  {"action": "shell", "command": "npm init -y"}\n'
             '  {"action": "write", "path": "index.js", "content": "console.log(\'hello\');"}\n'
             '  {"action": "read", "path": "package.json"}\n'
             '  {"action": "skill", "name": "github-repo", "args": "status /opt/valentine"}\n'
             '  {"action": "skill_install", "name": "server-monitor"}\n'
             '  {"action": "skill_list"}\n'
+            '  {"action": "mcp_tool", "name": "tool_name", "args": {"key": "value"}}\n'
             '  {"action": "respond", "text": "Your conversational response to the user"}\n\n'
             "RULES:\n"
             "- ALWAYS include a 'respond' action as the LAST action with a natural, "
@@ -174,7 +221,26 @@ class CodeSmithAgent(BaseAgent):
         return f"Skill '{name}' not found. Available skills:\n{self._discover_skills()}"
 
     def _install_skill(self, name: str) -> str:
-        """Install a built-in skill to the skills directory."""
+        """Install a skill from a git URL or from built-ins."""
+        # Support git URL installation via SkillsManager
+        if self.skill_manager and name.startswith(("http://", "https://", "git@")):
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # We're already in an async context — create a task via a new loop
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as pool:
+                        manifest = pool.submit(
+                            asyncio.run, self.skill_manager.install_from_git(name)
+                        ).result()
+                else:
+                    manifest = loop.run_until_complete(self.skill_manager.install_from_git(name))
+                return f"Skill '{manifest.name}' installed from {name}"
+            except Exception as e:
+                return f"Failed to install skill from git: {e}"
+
+        # Fall back to existing built-in install
         src = os.path.join(self.skills_builtin_dir, f"{name}.sh")
         if not os.path.isfile(src):
             return f"Skill '{name}' not found in built-ins."
@@ -249,6 +315,13 @@ class CodeSmithAgent(BaseAgent):
                 act = action.get("action")
                 if act == "shell":
                     cmd = action.get("command", "")
+                    if self.autonomy_gate:
+                        approved, reason = await self.autonomy_gate.check(
+                            "shell", cmd, chat_id=msg.chat_id,
+                        )
+                        if not approved:
+                            execution_log.append(f"$ {cmd}\n\u26a0\ufe0f Blocked: {reason}")
+                            continue
                     res = self._execute_shell(cmd)
                     execution_log.append(f"$ {cmd}\n{res}")
                 elif act == "read":
@@ -272,6 +345,26 @@ class CodeSmithAgent(BaseAgent):
                 elif act == "skill_list":
                     res = self._list_skills()
                     execution_log.append(res)
+                elif act == "mcp_tool":
+                    tool_name = action.get("name", "")
+                    tool_args = action.get("args", {})
+                    if self.mcp_manager:
+                        all_tools = self.mcp_manager.list_all_tools()
+                        server = None
+                        for t in all_tools:
+                            if t.name == tool_name:
+                                server = t.server_name
+                                break
+                        if server:
+                            try:
+                                res = await self.mcp_manager.call_tool(server, tool_name, tool_args)
+                                execution_log.append(f"[mcp:{tool_name}] {res}")
+                            except Exception as e:
+                                execution_log.append(f"[mcp:{tool_name}] Error: {e}")
+                        else:
+                            execution_log.append(f"[mcp:{tool_name}] Tool not found")
+                    else:
+                        execution_log.append("[mcp] MCP not configured")
                 elif act == "respond":
                     final_response = action.get("text", "")
 

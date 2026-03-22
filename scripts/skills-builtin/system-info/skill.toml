@@ -1,0 +1,19 @@
+[skill]
+name = "system-info"
+version = "1.0.0"
+description = "Get system information: CPU, memory, disk usage, uptime"
+author = "valentine"
+category = "server"
+
+[skill.entry]
+type = "shell"
+module = "run.sh"
+
+[skill.permissions]
+network = false
+filesystem = ["readonly"]
+shell = false
+max_timeout = 10
+
+[skill.triggers]
+keywords = ["system", "cpu", "memory", "disk", "uptime", "server status"]
