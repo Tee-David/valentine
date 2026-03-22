@@ -68,27 +68,25 @@ class OracleAgent(BaseAgent):
             ddgs = DDGS()
             results = []
 
-            # For queries that want recent info, try news first
+            # Strategy: try multiple approaches to get good results
+            # 1. For "recent" queries, try news first (best for current events)
             if recent:
                 try:
                     results = list(ddgs.news(query, max_results=5))
                 except Exception:
                     pass
 
-            # Text search — ALWAYS use a time filter to avoid stale results.
-            # "recent" queries use past month; all others use past year.
-            if not results:
-                kwargs = {"max_results": 8}
-                if recent:
-                    kwargs["timelimit"] = "m"  # last month
-                else:
-                    kwargs["timelimit"] = "y"  # last year — avoids 2024 stale data
-                results = list(ddgs.text(query, **kwargs))
+            # 2. If recent and news had nothing, try text with month filter
+            if recent and not results:
+                try:
+                    results = list(ddgs.text(query, max_results=5, timelimit="m"))
+                except Exception:
+                    pass
 
-            # If time-filtered search returned nothing, retry without filter
+            # 3. Standard text search — no time filter (DDG's default ranking is good)
             if not results:
                 try:
-                    results = list(ddgs.text(query, max_results=5))
+                    results = list(ddgs.text(query, max_results=8))
                 except Exception:
                     pass
 
