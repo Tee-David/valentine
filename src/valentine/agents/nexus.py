@@ -5,6 +5,8 @@ import json
 import logging
 from typing import Dict, Any
 
+import httpx
+
 from valentine.agents.base import BaseAgent
 from valentine.identity import identity_block
 from valentine.models import AgentName, AgentTask, TaskResult
@@ -62,17 +64,74 @@ class NexusAgent(BaseAgent):
     async def _execute_tool(self, tool_name: str, params: Dict[str, Any]) -> str:
         try:
             if tool_name == "get_weather":
-                loc = params.get("location", "Unknown")
-                return f"The weather in {loc} is currently sunny and 72°F. (Mock Data)"
+                return await self._get_weather(params)
             elif tool_name == "get_crypto_price":
-                sym = params.get("symbol", "BTC").upper()
-                prices = {"BTC": "$65,000", "ETH": "$3,500", "SOL": "$150"}
-                price = prices.get(sym, "unavailable")
-                return f"The current price of {sym} is {price}. (Mock Data)"
+                return await self._get_crypto_price(params)
             else:
-                return f"Tool '{tool_name}' not found."
+                return f"Tool '{tool_name}' is not available."
         except Exception as e:
-            return f"Error executing {tool_name}: {e}"
+            logger.error(f"Tool {tool_name} failed: {e}")
+            return "I couldn't fetch that data right now. Please try again in a moment."
+
+    async def _get_weather(self, params: dict) -> str:
+        """Fetch real weather from Open-Meteo (free, no API key)."""
+        location = params.get("location", "London")
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # Geocode
+            geo_resp = await client.get(
+                "https://geocoding-api.open-meteo.com/v1/search",
+                params={"name": location, "count": 1},
+            )
+            geo_data = geo_resp.json()
+            results = geo_data.get("results")
+            if not results:
+                return f"Couldn't find location '{location}'."
+            lat = results[0]["latitude"]
+            lon = results[0]["longitude"]
+            place_name = results[0].get("name", location)
+            country = results[0].get("country", "")
+            # Weather
+            weather_resp = await client.get(
+                "https://api.open-meteo.com/v1/forecast",
+                params={
+                    "latitude": lat, "longitude": lon,
+                    "current": "temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m",
+                    "temperature_unit": "celsius",
+                },
+            )
+            weather = weather_resp.json().get("current", {})
+            temp_c = weather.get("temperature_2m", "N/A")
+            temp_f = round(temp_c * 9/5 + 32, 1) if isinstance(temp_c, (int, float)) else "N/A"
+            humidity = weather.get("relative_humidity_2m", "N/A")
+            wind = weather.get("wind_speed_10m", "N/A")
+            return (
+                f"Weather in {place_name}, {country}: "
+                f"{temp_c}°C ({temp_f}°F), "
+                f"humidity {humidity}%, wind {wind} km/h"
+            )
+
+    async def _get_crypto_price(self, params: dict) -> str:
+        """Fetch real crypto prices from CoinGecko (free, no API key)."""
+        symbol = params.get("symbol", "BTC").upper()
+        symbol_map = {
+            "BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana",
+            "ADA": "cardano", "DOT": "polkadot", "DOGE": "dogecoin",
+            "XRP": "ripple", "MATIC": "matic-network", "AVAX": "avalanche-2",
+            "LINK": "chainlink", "BNB": "binancecoin", "LTC": "litecoin",
+        }
+        coin_id = symbol_map.get(symbol, symbol.lower())
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                "https://api.coingecko.com/api/v3/simple/price",
+                params={"ids": coin_id, "vs_currencies": "usd", "include_24hr_change": "true"},
+            )
+            data = resp.json()
+        if coin_id not in data:
+            return f"Couldn't find price for '{symbol}'. Try BTC, ETH, SOL, etc."
+        price = data[coin_id]["usd"]
+        change = data[coin_id].get("usd_24h_change")
+        change_str = f" ({change:+.2f}% 24h)" if change is not None else ""
+        return f"{symbol}: ${price:,.2f}{change_str}"
 
     async def process_task(self, task: AgentTask) -> TaskResult:
         msg = task.message
