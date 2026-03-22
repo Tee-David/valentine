@@ -15,6 +15,16 @@ from valentine.utils import safe_parse_json
 
 logger = logging.getLogger(__name__)
 
+_rag_instance = None
+
+
+def _get_rag():
+    global _rag_instance
+    if _rag_instance is None:
+        from valentine.core.rag import CodebaseRAG
+        _rag_instance = CodebaseRAG()
+    return _rag_instance
+
 
 class CodeSmithAgent(BaseAgent):
     def __init__(self, llm, bus, skill_manager=None, mcp_manager=None, autonomy_gate=None):
@@ -127,6 +137,7 @@ class CodeSmithAgent(BaseAgent):
             '  {"action": "skill_install", "name": "server-monitor"}\n'
             '  {"action": "skill_list"}\n'
             '  {"action": "mcp_tool", "name": "tool_name", "args": {"key": "value"}}\n'
+            '  {"action": "rag_search", "query": "semantic search query"} — Search the indexed codebase for relevant code\n'
             '  {"action": "respond", "text": "Your conversational response to the user"}\n\n'
             "RULES:\n"
             "- ALWAYS include a 'respond' action as the LAST action with a natural, "
@@ -372,6 +383,15 @@ class CodeSmithAgent(BaseAgent):
                             execution_log.append(f"[mcp:{tool_name}] Tool not found")
                     else:
                         execution_log.append("[mcp] MCP not configured")
+                elif act == "rag_search":
+                    rag = _get_rag()
+                    query = action.get("query", "")
+                    if not query:
+                        output = "No search query provided."
+                    else:
+                        results = await rag.search_formatted(query, limit=5)
+                        output = results if results else "No relevant code found. The codebase may not be indexed yet."
+                    execution_log.append(f"[rag_search] {output}")
                 elif act == "respond":
                     final_response = action.get("text", "")
 
