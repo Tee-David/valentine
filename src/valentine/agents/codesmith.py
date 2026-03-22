@@ -184,7 +184,37 @@ class CodeSmithAgent(BaseAgent):
             err = result.stderr.strip()
             if result.returncode == 0:
                 return out if out else "[Command succeeded with no output]"
-            return f"[Exit code {result.returncode}]: {err or out}"
+
+            output = f"[Exit code {result.returncode}]: {err or out}"
+
+            # Auto-suggest or install missing tools when a command fails
+            if err:
+                from valentine.core.evolution import SelfEvolver
+                import concurrent.futures
+                evolver = SelfEvolver(allow_apt=False)
+                suggestion = evolver.suggest_install(err)
+                if suggestion:
+                    install_info = evolver.INSTALL_MAP.get(suggestion)
+                    if install_info and install_info["method"] == "pip":
+                        # Auto-install pip packages (safe, no sudo needed)
+                        try:
+                            with concurrent.futures.ThreadPoolExecutor() as pool:
+                                import asyncio
+                                install_result = pool.submit(
+                                    asyncio.run, evolver.ensure_available(suggestion)
+                                ).result(timeout=130)
+                            if install_result.success:
+                                output += f"\n\n[Auto-installed {suggestion} via pip. You can retry the command.]"
+                            else:
+                                output += f"\n\n[Missing: {suggestion}. {install_result.message}]"
+                        except Exception as install_exc:
+                            output += f"\n\n[Missing: {suggestion}. Auto-install failed: {install_exc}]"
+                    elif install_info:
+                        output += f"\n\n[Missing tool: {suggestion}. Install with: {install_info['method']} install {install_info['package']}]"
+                    else:
+                        output += f"\n\n[Suggested missing tool: {suggestion}]"
+
+            return output
         except subprocess.TimeoutExpired:
             return "Error: Command timed out."
         except Exception as e:
