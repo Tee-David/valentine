@@ -6,6 +6,8 @@ import logging
 import os
 import subprocess
 import uuid
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from valentine.agents.base import BaseAgent
 from valentine.identity import identity_block
@@ -32,9 +34,16 @@ class EchoAgent(BaseAgent):
 
     @property
     def system_prompt(self) -> str:
+        try:
+            tz = ZoneInfo(settings.timezone)
+        except Exception:
+            tz = timezone.utc
+        now = datetime.now(tz)
+        time_str = now.strftime("%A, %B %d, %Y at %I:%M %p %Z")
         return (
             identity_block()
-            + "Currently responding to a voice message. The user spoke to you and their "
+            + f"Current date and time: {time_str}\n\n"
+            "Currently responding to a voice message. The user spoke to you and their "
             "words have been transcribed below.\n\n"
             "Respond naturally and conversationally, as if you're speaking back to them. "
             "Keep it warm, concise, and human — like a quick voice reply to a friend.\n\n"
@@ -224,12 +233,23 @@ class EchoAgent(BaseAgent):
         messages.extend(history[-6:])  # last few messages for context
         messages.append({"role": "user", "content": text})
 
-        try:
-            response_text = await self.llm.chat_completion(
-                messages, temperature=0.7,
-            )
-        except Exception as e:
-            logger.error(f"TTS LLM call failed: {e}")
+        response_text = None
+        # Try primary LLM first, then fall back to a fresh FallbackChain
+        for attempt_llm in [self.llm, None]:
+            try:
+                if attempt_llm is None:
+                    # Lazy fallback — create a FallbackChain on demand
+                    from valentine.llm import FallbackChain, GroqClient, CerebrasClient, SambaNovaClient
+                    attempt_llm = FallbackChain([GroqClient(), CerebrasClient(), SambaNovaClient()])
+                response_text = await attempt_llm.chat_completion(
+                    messages, temperature=0.7,
+                )
+                break
+            except Exception as e:
+                logger.error(f"TTS LLM call failed ({getattr(attempt_llm, 'provider_name', '?')}): {e}")
+                continue
+
+        if not response_text:
             return TaskResult(
                 task_id=task.task_id, agent=self.name,
                 success=False, error="I'm having trouble right now. Try again in a moment.",

@@ -72,19 +72,19 @@ def _detect_server_command(project_dir: str) -> tuple[str, int]:
     # Python projects
     manage_py = os.path.join(project_dir, "manage.py")
     if os.path.isfile(manage_py):
-        return "python manage.py runserver 0.0.0.0:8000", 8000
+        return "python3 manage.py runserver 0.0.0.0:8000", 8000
 
     app_py = os.path.join(project_dir, "app.py")
     if os.path.isfile(app_py):
-        return "python app.py", 5000
+        return "python3 app.py", 5000
 
     # Static files fallback
     index_html = os.path.join(project_dir, "index.html")
     if os.path.isfile(index_html):
-        return "python -m http.server 8080", 8080
+        return "python3 -m http.server 8080", 8080
 
     # Generic fallback
-    return "python -m http.server 8080", 8080
+    return "python3 -m http.server 8080", 8080
 
 
 def _find_cloudflared() -> Optional[str]:

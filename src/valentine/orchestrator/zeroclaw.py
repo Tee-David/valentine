@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import List
 
 from valentine.agents.base import BaseAgent
@@ -12,6 +13,35 @@ from valentine.models import AgentName, AgentTask, TaskResult, RoutingDecision, 
 from valentine.utils import safe_parse_json
 
 logger = logging.getLogger(__name__)
+
+# Keyword patterns that ALWAYS route to CodeSmith — bypasses the LLM entirely.
+# This prevents Oracle from giving tutorials for tasks CodeSmith should handle.
+_CODESMITH_PATTERNS = re.compile(
+    r"\b("
+    r"write\s+(a\s+|some\s+|the\s+)?code"
+    r"|build\s+(me\s+)?(a\s+|the\s+)?(\w+\s+)?(web\s*app|website|app|api|server|bot|tool|script|page|dashboard|project|site|program|game)"
+    r"|create\s+(me\s+)?(a\s+|the\s+)?(\w+\s+)?(web\s*app|website|app|api|server|bot|tool|script|page|dashboard|project|site|program|game|python|node|flask|fastapi|django|react|environment|venv|virtualenv)"
+    r"|make\s+(me\s+)?(a\s+|the\s+)?(\w+\s+)?(web\s*app|website|app|api|server|bot|tool|script|page|dashboard|project|site|program|game)"
+    r"|deploy\b|dockerfile|docker\s*compose|nginx|systemd|cloudflare"
+    r"|set\s*up\s+(a\s+|the\s+)?(\w+\s+)?(server|environment|project|venv|virtualenv|python|node|database|redis|docker)"
+    r"|install\s+(a\s+)?(\w+\s+)?(package|module|library|dependency|pip|npm|node|python)"
+    r"|run\s+(this|a|the)?\s*(command|script|code|shell|bash|python|pip|npm)"
+    r"|git\s+(clone|push|pull|commit|init|status|log|branch|merge|checkout|stash|diff|remote|reset|rebase)"
+    r"|github\b|gitlab\b"
+    r"|debug\s+(this|my|the)"
+    r"|fix\s+(this|my|the)\s*(\w+\s+)?(code|bug|error|issue|script)"
+    r"|refactor\b|optimize\s+(this|my|the)\s*(\w+\s+)?(code|function|script)"
+    r"|pip\s+install|npm\s+install|apt\s+install"
+    r"|python3?\s+|node\s+|bash\s+|sh\s+"
+    r"|curl\s+|wget\s+"
+    r"|chmod\s+|chown\s+|mkdir\s+|ls\s+-"
+    r"|server\s+status|cpu\s+usage|disk\s+space|memory\s+usage"
+    r"|check\s+(the\s+)?(\w+\s+)?(server|system|cpu|memory|disk|ram|uptime|load)"
+    r"|skill\s+(install|list|run)"
+    r"|cron\s*job|systemctl|service\s+(start|stop|restart|status)"
+    r")\b",
+    re.IGNORECASE,
+)
 
 
 class ZeroClawRouter(BaseAgent):
@@ -65,14 +95,19 @@ class ZeroClawRouter(BaseAgent):
 Your ONLY job is to analyze each incoming user message and decide which sub-agent should handle it.
 
 Available Agents:
-1. "oracle" — DEFAULT. Casual chat, questions, research, web search, summarization, games, conversation, general knowledge. Use this for anything that doesn't clearly fit another agent.
-2. "codesmith" — Code generation, debugging, DevOps, shell commands, programming questions, GitHub operations, server management, skill installation/management, file operations, deployment tasks. Use when the user asks to:
-   - Write, debug, or explain code
-   - Run commands or scripts
-   - Manage GitHub repos (clone, push, pull, PRs, issues)
-   - Check server status, CPU, memory, disk
+1. "oracle" — ONLY for casual chat, opinions, general knowledge, web search, news, games, and conversation. Use oracle when the user is TALKING, not when they want something BUILT or DONE.
+2. "codesmith" — Code, building, creating, deploying, DevOps, shell, scripts, GitHub, server management, skills, file operations. Route to codesmith when the user wants to:
+   - BUILD, CREATE, MAKE, or SET UP anything technical (apps, websites, APIs, environments, projects, tools, bots, scripts, games, dashboards)
+   - Write, debug, fix, refactor, or explain code
+   - Run commands, scripts, or shell operations
+   - Manage GitHub/git repos (clone, push, pull, PRs, issues, commits)
+   - Check server status, CPU, memory, disk, uptime
+   - Install packages, libraries, or dependencies (pip, npm, apt)
    - Install/list/run skills
-   - Deploy or manage services
+   - Deploy, manage services, configure infrastructure
+   - Create a Python/Node/virtual environment
+   - Work with Docker, nginx, systemd, cron jobs
+   IMPORTANT: If the user says "create", "build", "make", "set up", "deploy", or "install" followed by ANYTHING technical → route to "codesmith", NOT "oracle". Oracle gives tutorials. CodeSmith actually does the work.
 3. "iris" — Vision and images ONLY. Use when:
    - The user sends a PHOTO/IMAGE (content_type is "photo")
    - The user asks to GENERATE/CREATE/MAKE an image
@@ -88,9 +123,11 @@ RULES:
 - If content_type is "photo" → ALWAYS route to "iris", regardless of text.
 - If content_type is "voice" → ALWAYS route to "echo".
 - If the user asks to generate/create/make an image → route to "iris".
-- GitHub, git, deploy, server, skills, shell → route to "codesmith".
+- If the user says "create", "build", "make", "set up", "deploy", "install", "run", "write", "code", "debug", "fix" → route to "codesmith".
+- GitHub, git, deploy, server, skills, shell, python, pip, npm, docker → route to "codesmith".
 - Website scraping, page interaction, JS-rendered content → route to "browser".
-- If unsure → route to "oracle".
+- Oracle is ONLY for conversation, opinions, search, and general knowledge. NEVER route a "build/create/make" request to oracle.
+- If unsure between oracle and codesmith → route to "codesmith". It can always respond conversationally if the task is just a question.
 
 Output ONLY valid JSON:
 {"intent": "short description", "agent": "oracle|codesmith|iris|echo|browser", "priority": "normal", "chain": [], "params": {"tool": "tool_name"}}
@@ -187,6 +224,10 @@ No markdown. No explanation. JSON only."""
                 target_agent = AgentName.IRIS
             elif content_type == ContentType.VOICE:
                 target_agent = AgentName.ECHO
+            elif target_agent == AgentName.ORACLE and msg.text and _CODESMITH_PATTERNS.search(msg.text):
+                # Keyword override: LLM said Oracle but the message clearly needs CodeSmith
+                logger.info(f"ZeroClaw keyword override: Oracle → CodeSmith for: {msg.text[:80]}")
+                target_agent = AgentName.CODESMITH
 
             # Convert LLM output strings to proper enums
             try:

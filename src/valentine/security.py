@@ -94,8 +94,33 @@ def sanitise_output(text: str) -> str:
     for pattern, replacement in _SENSITIVE_OUTPUT_PATTERNS:
         text = pattern.sub(replacement, text)
 
-    # Strip internal API URLs
-    text = re.sub(r"https?://[^\s,)]+", "[redacted-url]", text)
+    # Strip internal API URLs but preserve user-facing URLs (preview links, search sources)
+    def _redact_url(match):
+        url = match.group(0)
+        # Whitelist: Cloudflare tunnels, common web sources the user should see
+        _SAFE_DOMAINS = (
+            "trycloudflare.com",
+            "wikipedia.org",
+            "github.com",
+            "stackoverflow.com",
+            "forbes.com",
+            "bloomberg.com",
+            "reuters.com",
+            "bbc.com",
+            "cnn.com",
+            "nytimes.com",
+            "medium.com",
+            "youtube.com",
+            "reddit.com",
+        )
+        if any(domain in url for domain in _SAFE_DOMAINS):
+            return url
+        # Also preserve any URL the LLM is citing as a source (has a recognizable TLD)
+        if re.search(r"https?://[a-z0-9][-a-z0-9]*\.(com|org|net|io|co|dev|ai|edu|gov)", url):
+            return url
+        return "[redacted-url]"
+
+    text = re.sub(r"https?://[^\s,)]+", _redact_url, text)
 
     # Strip Python tracebacks
     if "Traceback (most recent call last)" in text:

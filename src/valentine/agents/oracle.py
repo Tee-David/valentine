@@ -4,6 +4,8 @@ from __future__ import annotations
 import logging
 import httpx
 import re
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import List
 
 from duckduckgo_search import DDGS
@@ -12,6 +14,7 @@ from valentine.agents.base import BaseAgent
 from valentine.identity import identity_block, capabilities_block, COMPANY_NAME, CEO_NAME, PRODUCT_NAME
 from valentine.security import is_self_awareness_query
 from valentine.models import AgentName, AgentTask, TaskResult
+from valentine.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +32,16 @@ class OracleAgent(BaseAgent):
 
     @property
     def system_prompt(self) -> str:
+        try:
+            tz = ZoneInfo(settings.timezone)
+        except Exception:
+            tz = timezone.utc
+        now = datetime.now(tz)
+        time_str = now.strftime("%A, %B %d, %Y at %I:%M %p %Z")
         return (
             identity_block()
-            + "You're warm, witty, confident, and genuinely helpful. You have personality and "
+            + f"Current date and time: {time_str}\n\n"
+            "You're warm, witty, confident, and genuinely helpful. You have personality and "
             "opinions. You remember what was said earlier in the conversation and build on it.\n\n"
             "Guidelines:\n"
             "- Be conversational and natural, never robotic or generic.\n"
@@ -40,7 +50,10 @@ class OracleAgent(BaseAgent):
             "not a blog post. Only go longer if the user explicitly says 'explain in detail'.\n"
             "- NEVER use bullet-point lists, numbered lists, markdown headers (###), or bold (**) "
             "in casual conversation. Just talk naturally like texting a smart friend.\n"
-            "- When given search results, synthesize them into a natural answer with sources.\n"
+            "- When given search results in the context below, you MUST use them. Synthesize them "
+            "into a direct, natural answer and cite sources. NEVER say 'I can't search' or "
+            "'I don't have access to search' — if search results appear below your prompt, "
+            "you already have them. Just answer using the data.\n"
             "- If continuing a game or activity, stay in character and keep playing.\n"
             "- Never say 'I'm just an AI' or 'I'm functioning within normal parameters.'\n"
             "- You are Valentine. Own it.\n"
@@ -62,12 +75,22 @@ class OracleAgent(BaseAgent):
                 except Exception:
                     pass
 
-            # Fall back to text search (with time filter for recent queries)
+            # Text search — ALWAYS use a time filter to avoid stale results.
+            # "recent" queries use past month; all others use past year.
             if not results:
-                kwargs = {"max_results": 5}
+                kwargs = {"max_results": 8}
                 if recent:
                     kwargs["timelimit"] = "m"  # last month
+                else:
+                    kwargs["timelimit"] = "y"  # last year — avoids 2024 stale data
                 results = list(ddgs.text(query, **kwargs))
+
+            # If time-filtered search returned nothing, retry without filter
+            if not results:
+                try:
+                    results = list(ddgs.text(query, max_results=5))
+                except Exception:
+                    pass
 
             if not results:
                 return ""
@@ -105,6 +128,28 @@ class OracleAgent(BaseAgent):
         lower = text.lower()
         return any(s in lower for s in self._RECENT_SIGNALS)
 
+    @staticmethod
+    def _clean_search_query(text: str) -> str:
+        """Strip conversational fluff from a search query to get a clean DDG query.
+
+        Handles: 'Search Google for X', 'Google X', 'Look up X for me',
+        'Can you search for X', 'Find out about X', etc.
+        """
+        q = text.strip()
+        # Remove leading conversational wrappers (+ for chained: "hey valentine, please")
+        q = re.sub(
+            r"^(can you |could you |please |hey |valentine,?\s*)+",
+            "", q, flags=re.IGNORECASE,
+        ).strip()
+        # Remove "search [google|the web|online|internet] [for]" prefixes
+        q = re.sub(
+            r"^(search|google|look\s*up|find\s*out)\s*(google|the\s*web|online|the\s*internet|on\s*google)?\s*(for|about)?\s*",
+            "", q, flags=re.IGNORECASE,
+        ).strip()
+        # Remove trailing "for me", "please", etc.
+        q = re.sub(r"\s+(for me|please|thanks|thank you)\.?$", "", q, flags=re.IGNORECASE).strip()
+        return q or text.strip()
+
     async def process_task(self, task: AgentTask) -> TaskResult:
         intent = task.routing.intent
         msg = task.message
@@ -139,16 +184,16 @@ class OracleAgent(BaseAgent):
 
         # Web search
         elif self._needs_search(target_prompt, intent):
-            search_query = target_prompt
-            for prefix in ("search for ", "search ", "google ", "look up "):
-                if search_query.lower().startswith(prefix):
-                    search_query = search_query[len(prefix):].strip()
-                    break
+            search_query = self._clean_search_query(target_prompt)
             recent = self._wants_recent(target_prompt)
             logger.info(f"Oracle searching: {search_query} (recent={recent})")
             results = await self._search_web(search_query, recent=recent)
             if results:
-                external_context += f"\n\nWEB SEARCH RESULTS (use these to answer — cite sources):\n{results}"
+                external_context += (
+                    f"\n\nWEB SEARCH RESULTS — You MUST use these to answer the user's question. "
+                    f"Synthesize the information naturally and cite sources. Do NOT say you can't "
+                    f"search or don't have results — the results are RIGHT HERE:\n{results}"
+                )
 
         # Memory context
         if task.routing.memory_context:

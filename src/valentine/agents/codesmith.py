@@ -5,6 +5,8 @@ import json
 import logging
 import os
 import subprocess
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import List
 
 from valentine.agents.base import BaseAgent
@@ -114,9 +116,16 @@ class CodeSmithAgent(BaseAgent):
             except Exception:
                 logger.warning("Failed to list MCP tools for system prompt")
 
+        try:
+            tz = ZoneInfo(settings.timezone)
+        except Exception:
+            tz = timezone.utc
+        now = datetime.now(tz)
+        time_str = now.strftime("%A, %B %d, %Y at %I:%M %p %Z")
         return (
             identity_block()
-            + "Currently operating in engineering mode. You're a world-class full-stack "
+            + f"Current date and time: {time_str}\n\n"
+            "Currently operating in engineering mode. You're a world-class full-stack "
             "developer, DevOps engineer, and systems architect. You write clean, "
             "production-quality code and explain your thinking clearly.\n\n"
             f"You have access to a workspace directory at {self.workspace} on the host server "
@@ -398,6 +407,7 @@ class CodeSmithAgent(BaseAgent):
             final_response = ""
             final_media_path = None
             final_file_name = None
+            preview_url = None  # Track preview URL to inject into response
 
             for action in actions:
                 act = action.get("action")
@@ -493,13 +503,17 @@ class CodeSmithAgent(BaseAgent):
                         output = f"Document generation failed: {e}"
                     execution_log.append(output)
                 elif act == "preview":
-                    from valentine.core.preview import create_preview
+                    from valentine.core.preview import create_preview, _active_sessions
                     proj_path = action.get("path", self.workspace)
                     custom_cmd = action.get("command")
                     custom_port = action.get("port")
                     try:
                         result = await create_preview(proj_path, custom_cmd, custom_port)
                         execution_log.append(f"[preview] {result}")
+                        # Extract the URL so we can inject it into the user response
+                        session = _active_sessions.get(proj_path)
+                        if session:
+                            preview_url = session.url
                     except RuntimeError as e:
                         execution_log.append(f"[preview] Error: {e}")
                 elif act == "stop_preview":
@@ -513,6 +527,10 @@ class CodeSmithAgent(BaseAgent):
             # If LLM didn't include a respond action, summarize what happened
             if not final_response:
                 final_response = "Done! I executed your request."
+
+            # Inject preview URL into the response if the LLM didn't mention it
+            if preview_url and "trycloudflare.com" not in final_response:
+                final_response += f"\n\nHere's your live preview: {preview_url}"
 
             # User sees only the respond text — execution details stay in logs
             out_txt = final_response

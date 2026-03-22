@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     cerebras_rpd: int = 1000
     sambanova_rpd: int = 10000
 
+    # Timezone for user-facing time display (e.g. "Africa/Lagos", "US/Eastern")
+    timezone: str = Field(default="Africa/Lagos")
+
     # Logging
     log_level: str = Field(default="INFO")
 

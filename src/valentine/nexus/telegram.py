@@ -42,6 +42,9 @@ class TelegramAdapter(PlatformAdapter):
     # Suppress duplicate errors to the same chat within this window (seconds)
     _ERROR_DEDUP_WINDOW = 30.0
 
+    # Dedup window: ignore Telegram updates we've already processed (survives restarts via Redis)
+    _DEDUP_TTL = 300  # 5 minutes — updates older than this won't be re-delivered by Telegram anyway
+
     def __init__(self, bus: RedisBus):
         self.bus = bus
         self.app = Application.builder().token(settings.telegram_bot_token).build()
@@ -630,6 +633,15 @@ class TelegramAdapter(PlatformAdapter):
         text: str,
         media_path: str | None = None,
     ):
+        # --- Dedup: prevent processing the same Telegram update twice (e.g. after restart) ---
+        update_id = str(update.update_id)
+        dedup_key = f"tg:dedup:{update_id}"
+        already_seen = await self.bus.redis.set(dedup_key, "1", nx=True, ex=self._DEDUP_TTL)
+        if not already_seen:
+            # The key already existed — we've processed this update before
+            logger.info(f"Dedup: skipping already-processed update {update_id}")
+            return
+
         # --- Access control gate ---
         user_id = str(update.effective_user.id)
         if self._access:
