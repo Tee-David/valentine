@@ -804,7 +804,10 @@ class TelegramAdapter(PlatformAdapter):
         if ext and not validate_media_extension(f"file{ext}"):
             logger.warning("Rejected media with disallowed extension: %s", ext)
             raise ValueError(f"File type '{ext}' is not supported.")
-        local_path = f"/tmp/{tg_file.file_id}{ext}"
+        # Use workspace /tmp dir (system /tmp may be read-only on some VMs)
+        media_dir = os.path.join(settings.workspace_dir, ".media")
+        os.makedirs(media_dir, exist_ok=True)
+        local_path = os.path.join(media_dir, f"{tg_file.file_id}{ext}")
         await tg_file.download_to_drive(custom_path=local_path)
         logger.info(f"Downloaded media → {local_path}")
         return local_path
