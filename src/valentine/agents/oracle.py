@@ -8,7 +8,10 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from typing import List
 
-from duckduckgo_search import DDGS
+try:
+    from ddgs import DDGS
+except ImportError:
+    from duckduckgo_search import DDGS
 
 from valentine.agents.base import BaseAgent
 from valentine.identity import identity_block, capabilities_block, COMPANY_NAME, CEO_NAME, PRODUCT_NAME
