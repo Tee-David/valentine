@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from collections import defaultdict
@@ -26,6 +27,7 @@ from valentine.models import (
 )
 from valentine.nexus.adapter import PlatformAdapter
 from valentine.access import AccessControl
+from valentine.core.scheduler import Scheduler, parse_duration
 from valentine.security import (
     sanitise_input, detect_injection, validate_media_extension,
 )
@@ -117,10 +119,23 @@ class TelegramAdapter(PlatformAdapter):
         self._access = AccessControl(self.bus.redis)
         await self.app.initialize()
 
+        # Acquire exclusive polling lock — only one bot instance can poll at a time.
+        # This prevents 409 Conflict from zombie processes that survive restarts.
+        lock_key = "valentine:telegram:polling_lock"
+        lock_value = str(uuid.uuid4())
+        # Force-set the lock (overrides any stale lock from a dead process)
+        await self.bus.redis.set(lock_key, lock_value, ex=300)  # 5 min TTL
+        self._polling_lock_key = lock_key
+        self._polling_lock_value = lock_value
+        logger.info(f"Acquired exclusive polling lock: {lock_value[:8]}...")
+
         # Clear any stale webhook/polling session to prevent
         # "terminated by other getUpdates request" conflicts
         try:
             await self.app.bot.delete_webhook(drop_pending_updates=True)
+            # Wait a moment for Telegram to release the old polling session
+            import asyncio as _asyncio
+            await _asyncio.sleep(1)
             logger.info("Cleared stale webhook/updates before starting polling.")
         except Exception as e:
             logger.warning(f"delete_webhook on startup failed (non-fatal): {e}")
@@ -704,11 +719,61 @@ class TelegramAdapter(PlatformAdapter):
         except Exception as e:
             logger.error(f"Failed to route message {msg.message_id}: {e}")
 
+    # Reminder pattern: "remind me in 30s to buy a boat"
+    _REMINDER_PATTERN = re.compile(
+        r"remind\s+me\s+in\s+(\d+\s*(?:s|sec|seconds?|m|min|minutes?|h|hr|hours?|d|days?))\s+(?:to\s+)?(.+)",
+        re.IGNORECASE,
+    )
+
+    async def _try_create_reminder(self, update: Update, text: str) -> bool:
+        """Check if the message is a reminder request. Returns True if handled."""
+        match = self._REMINDER_PATTERN.search(text)
+        if not match:
+            return False
+
+        duration_str = match.group(1).strip()
+        reminder_msg = match.group(2).strip()
+        delay = parse_duration(duration_str)
+        if not delay:
+            return False
+
+        scheduler = Scheduler()
+        try:
+            user = update.effective_user
+            user_name = user.first_name or user.username or ""
+            await scheduler.create_reminder(
+                chat_id=str(update.effective_chat.id),
+                user_id=str(user.id),
+                user_name=user_name,
+                message=reminder_msg,
+                delay_seconds=delay,
+            )
+            # Format friendly time
+            if delay < 60:
+                time_str = f"{delay} seconds"
+            elif delay < 3600:
+                time_str = f"{delay // 60} minute{'s' if delay >= 120 else ''}"
+            else:
+                time_str = f"{delay // 3600} hour{'s' if delay >= 7200 else ''}"
+            await update.message.reply_text(
+                f"Got it! I'll remind you in {time_str}: {reminder_msg}"
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to create reminder: {e}")
+            return False
+        finally:
+            await scheduler.close()
+
     async def _on_text(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await self.send_typing(str(update.effective_chat.id))
         text = update.message.text
-        if text:
-            await self._route(update, ContentType.TEXT, text)
+        if not text:
+            return
+        # Check for reminder requests first (handled directly, no LLM needed)
+        if await self._try_create_reminder(update, text):
+            return
+        await self._route(update, ContentType.TEXT, text)
 
     async def _on_photo(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await self.send_typing(str(update.effective_chat.id))

@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 # Redis keys
 JOBS_KEY = "valentine:scheduler:jobs"         # Hash of all scheduled jobs
+REMINDERS_KEY = "valentine:scheduler:reminders"  # Hash of one-shot reminders
 RESULTS_KEY = "valentine:scheduler:results"   # Recent results (sorted set by timestamp)
 
 
@@ -84,6 +85,59 @@ class ScheduledJob:
             last_result=data.get("last_result", ""),
             created_at=float(data.get("created_at", time.time())),
         )
+
+
+@dataclass
+class Reminder:
+    """A one-shot reminder that fires once and auto-deletes."""
+    reminder_id: str
+    chat_id: str
+    user_id: str
+    user_name: str
+    message: str              # what to remind about
+    fire_at: float            # Unix timestamp when reminder should fire
+    created_at: float = field(default_factory=time.time)
+
+    def to_dict(self) -> dict:
+        return {
+            "reminder_id": self.reminder_id,
+            "chat_id": self.chat_id,
+            "user_id": self.user_id,
+            "user_name": self.user_name,
+            "message": self.message,
+            "fire_at": self.fire_at,
+            "created_at": self.created_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Reminder:
+        return cls(
+            reminder_id=data["reminder_id"],
+            chat_id=data["chat_id"],
+            user_id=data["user_id"],
+            user_name=data.get("user_name", ""),
+            message=data["message"],
+            fire_at=float(data["fire_at"]),
+            created_at=float(data.get("created_at", time.time())),
+        )
+
+
+def parse_duration(text: str) -> int | None:
+    """Parse a human duration like '30s', '5 minutes', '2 hours', '1 day' into seconds.
+
+    Returns None if unparseable.
+    """
+    text = text.lower().strip()
+    match = re.match(
+        r"(\d+)\s*(s|sec|seconds?|m|min|minutes?|h|hr|hours?|d|days?)",
+        text,
+    )
+    if match:
+        value = int(match.group(1))
+        unit = match.group(2)[0]
+        multipliers = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+        return max(value * multipliers.get(unit, 60), 5)  # minimum 5 seconds
+    return None
 
 
 def parse_schedule(expression: str) -> int:
@@ -239,6 +293,82 @@ class Scheduler:
             )
         return "\n\n".join(lines)
 
+    # -- Reminders (one-shot) ------------------------------------------
+
+    async def create_reminder(
+        self,
+        chat_id: str,
+        user_id: str,
+        user_name: str,
+        message: str,
+        delay_seconds: int,
+    ) -> Reminder:
+        """Create a one-shot reminder that fires after delay_seconds."""
+        await self._connect()
+        reminder = Reminder(
+            reminder_id=str(uuid.uuid4())[:8],
+            chat_id=chat_id,
+            user_id=user_id,
+            user_name=user_name,
+            message=message,
+            fire_at=time.time() + delay_seconds,
+        )
+        await self._redis.hset(REMINDERS_KEY, reminder.reminder_id, json.dumps(reminder.to_dict()))
+        logger.info(f"Created reminder '{message[:50]}' for chat {chat_id} in {delay_seconds}s")
+        return reminder
+
+    async def list_reminders(self, chat_id: str | None = None) -> list[Reminder]:
+        """List pending reminders, optionally filtered by chat_id."""
+        await self._connect()
+        raw = await self._redis.hgetall(REMINDERS_KEY)
+        reminders = []
+        for data in raw.values():
+            r = Reminder.from_dict(json.loads(data))
+            if chat_id is None or r.chat_id == chat_id:
+                reminders.append(r)
+        return sorted(reminders, key=lambda r: r.fire_at)
+
+    async def delete_reminder(self, reminder_id: str) -> bool:
+        await self._connect()
+        return (await self._redis.hdel(REMINDERS_KEY, reminder_id)) > 0
+
+    async def _check_reminders(self):
+        """Check for due reminders, fire them, and delete."""
+        now = time.time()
+        raw = await self._redis.hgetall(REMINDERS_KEY)
+
+        for data in raw.values():
+            reminder = Reminder.from_dict(json.loads(data))
+            if now >= reminder.fire_at:
+                logger.info(f"Firing reminder: {reminder.message[:50]}")
+                await self._fire_reminder(reminder)
+                await self._redis.hdel(REMINDERS_KEY, reminder.reminder_id)
+
+    async def _fire_reminder(self, reminder: Reminder):
+        """Send a reminder notification directly to the user's chat."""
+        from valentine.bus.redis_bus import RedisBus
+        from valentine.models import AgentName, ContentType, TaskResult
+
+        bus = RedisBus()
+        try:
+            name = reminder.user_name or "there"
+            text = f"Hey {name}! You asked me to remind you: {reminder.message}"
+            result = TaskResult(
+                task_id=f"reminder-{reminder.reminder_id}",
+                agent=AgentName.ORACLE,
+                success=True,
+                content_type=ContentType.TEXT,
+                text=text,
+                chat_id=reminder.chat_id,
+            )
+            # Publish directly to agent.response — Telegram adapter picks it up
+            await bus.redis.publish("agent.response", json.dumps(result.to_dict()))
+            logger.info(f"Reminder fired for chat {reminder.chat_id}")
+        except Exception as e:
+            logger.error(f"Failed to fire reminder: {e}")
+        finally:
+            await bus.close()
+
     # -- Execution Loop ------------------------------------------------
 
     async def run_loop(self):
@@ -253,6 +383,11 @@ class Scheduler:
         while self._running:
             try:
                 now = time.time()
+
+                # --- Check one-shot reminders (high priority) ---
+                await self._check_reminders()
+
+                # --- Check recurring jobs ---
                 raw = await self._redis.hgetall(JOBS_KEY)
 
                 for job_data in raw.values():
@@ -278,7 +413,7 @@ class Scheduler:
             except Exception as e:
                 logger.error(f"Scheduler loop error: {e}")
 
-            await asyncio.sleep(10)  # check every 10 seconds
+            await asyncio.sleep(5)  # check every 5 seconds (reminders need precision)
 
     async def _execute_job(self, job: ScheduledJob):
         """
