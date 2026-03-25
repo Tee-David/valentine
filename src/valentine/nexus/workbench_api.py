@@ -2,17 +2,36 @@
 import asyncio
 import json
 import logging
+import os
+from pathlib import Path
 from typing import AsyncGenerator
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from sse_starlette.sse import EventSourceResponse
+from fastapi.staticfiles import StaticFiles
+
+try:
+    from sse_starlette.sse import EventSourceResponse
+except ImportError:
+    EventSourceResponse = None  # SSE is optional
 
 from valentine.bus.redis_bus import RedisBus
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Valentine Workbench API")
+
+# Serve the built Vite Mini App frontend as static files
+# The frontend should be built to /opt/valentine/frontend-miniapp/dist/
+_FRONTEND_DIST = Path(os.environ.get(
+    "VALENTINE_MINIAPP_DIST",
+    "/opt/valentine/frontend-miniapp/dist"
+))
+if _FRONTEND_DIST.is_dir():
+    app.mount("/app", StaticFiles(directory=str(_FRONTEND_DIST), html=True), name="miniapp")
+    logger.info("Serving Mini App frontend from %s", _FRONTEND_DIST)
+else:
+    logger.warning("Mini App dist not found at %s — /app will 404", _FRONTEND_DIST)
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,17 +43,54 @@ app.add_middleware(
 
 # Global bus instance for the API
 bus: RedisBus | None = None
+_tunnel_proc = None
 
+async def _start_cloudflare_tunnel():
+    """Start cloudflared to expose port 8000 and save URL to Redis."""
+    import subprocess, re, shutil
+    cloudflared = shutil.which("cloudflared")
+    if not cloudflared:
+        logger.warning("cloudflared not found. Mini App will not have a public HTTPS URL.")
+        return
+
+    global _tunnel_proc
+    _tunnel_proc = subprocess.Popen(
+        [cloudflared, "tunnel", "--url", "http://localhost:8000"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    
+    url_pattern = re.compile(r"(https://[a-z0-9-]+\.trycloudflare\.com)")
+    import time
+    timeout = time.time() + 15
+    while time.time() < timeout:
+        line = _tunnel_proc.stderr.readline()
+        if not line:
+            await asyncio.sleep(0.1)
+            continue
+        match = url_pattern.search(line)
+        if match:
+            url = match.group(1)
+            logger.info("Workbench Tunnel live at: %s", url)
+            if bus:
+                await bus.redis.set("valentine:workbench:live_url", url)
+            return
+            
+    logger.error("Failed to extract Cloudflare URL for Workbench")
 
 @app.on_event("startup")
 async def startup():
     global bus
     bus = RedisBus()
     logger.info("Workbench API connected to Redis")
-
+    asyncio.create_task(_start_cloudflare_tunnel())
 
 @app.on_event("shutdown")
 async def shutdown():
+    global _tunnel_proc
+    if _tunnel_proc:
+        _tunnel_proc.terminate()
     if bus:
         await bus.close()
 

@@ -497,8 +497,14 @@ class TelegramAdapter(PlatformAdapter):
         from telegram import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
         import os
         
-        # The MiniApp must be served over HTTPS. We check an environment variable first.
-        workbench_url = os.environ.get("VALENTINE_WORKBENCH_URL", "https://valentine-workbench.vercel.app")
+        # Try to get the live Cloudflare URL from our new automated tunnel
+        raw_url = await self.bus.redis.get("valentine:workbench:live_url")
+        if not raw_url:
+            await update.message.reply_text("The Workbench backend is still starting up or unavailable. Try again in a few seconds.")
+            return
+            
+        # The Mini App frontend is served statically on /app
+        workbench_url = f"{raw_url.decode('utf-8')}/app"
         
         keyboard = [
             [InlineKeyboardButton(
