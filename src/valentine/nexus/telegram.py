@@ -103,6 +103,7 @@ class TelegramAdapter(PlatformAdapter):
         # Morning reports
         self.app.add_handler(CommandHandler("morning", self._cmd_morning))
         self.app.add_handler(CallbackQueryHandler(self._handle_morning_callback, pattern='^mr_'))
+        self.app.add_handler(CallbackQueryHandler(self._handle_resume_callback, pattern='^resume_'))
         # User management (admin only)
         self.app.add_handler(CommandHandler("users", self._cmd_users))
         self.app.add_handler(CommandHandler("allow", self._cmd_allow))
@@ -725,7 +726,7 @@ class TelegramAdapter(PlatformAdapter):
         await update.message.reply_text(f"Started new session: {name} (ID: {session_id})\nHistory context initialized. What are we building today?")
 
     async def _cmd_conversations(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        """List active sessions."""
+        """List active sessions with tap-to-resume buttons."""
         from datetime import datetime
         chat_id = str(update.effective_chat.id)
         active = await self.bus.get_active_session(chat_id)
@@ -734,27 +735,58 @@ class TelegramAdapter(PlatformAdapter):
             await update.message.reply_text("No sessions found. Use /new <name> to create one.")
             return
 
-        lines = ["*Your Sessions:*"]
-        for s in sessions:
+        lines = ["📋 *Your Sessions:*\n"]
+        buttons = []
+        for i, s in enumerate(sessions, 1):
             marker = "🟢" if s['id'] == active else "⚪"
             dt = datetime.fromtimestamp(s['created']).strftime('%b %d %H:%M')
-            lines.append(f"{marker} `{s['id']}` - {s['name']} _({dt})_")
-        lines.append("\nUse `/resume <id>` to switch contexts.")
-        await update.message.reply_markdown("\n".join(lines))
+            lines.append(f"{marker} *{i}.* {s['name']} _({dt})_")
+            btn_label = f"{'✅ ' if s['id'] == active else ''}{i}. {s['name']}"
+            buttons.append([InlineKeyboardButton(btn_label, callback_data=f"resume_{s['id']}")])
+
+        lines.append("\nTap a session to switch, or /new <name> to create one.")
+        await update.message.reply_text(
+            "\n".join(lines),
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
 
     async def _cmd_resume(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        """Switch to a specific session."""
+        """Switch to a specific session by number or ID."""
         chat_id = str(update.effective_chat.id)
-        session_id = update.message.text.replace("/resume", "").strip()
-        if not session_id:
-            await update.message.reply_text("Usage: `/resume <id>`", parse_mode="Markdown")
+        arg = update.message.text.replace("/resume", "").strip()
+        if not arg:
+            await update.message.reply_text("Usage: /resume <number or name>\nOr use /conversations to see a list with buttons.")
             return
+
+        session_id = arg
+        # If user typed a number, resolve it from their session list
+        if arg.isdigit():
+            sessions = await self.bus.list_sessions(chat_id)
+            idx = int(arg) - 1
+            if 0 <= idx < len(sessions):
+                session_id = sessions[idx]['id']
+            else:
+                await update.message.reply_text(f"No session #{arg}. Use /conversations to see all sessions.")
+                return
 
         success = await self.bus.switch_session(chat_id, session_id)
         if success:
-            await update.message.reply_text(f"Switched context to session `{session_id}`.\nValentine now remembers the history for this thread.", parse_mode="Markdown")
+            await update.message.reply_text(f"✅ Switched to session. I'm back in that context now!", parse_mode="Markdown")
         else:
-            await update.message.reply_text("Session ID not found.", parse_mode="Markdown")
+            await update.message.reply_text("Session not found. Use /conversations to see available sessions.")
+
+    async def _handle_resume_callback(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Handle inline keyboard resume button presses."""
+        query = update.callback_query
+        await query.answer()
+        chat_id = str(query.message.chat_id)
+        session_id = query.data.replace("resume_", "")
+        success = await self.bus.switch_session(chat_id, session_id)
+        if success:
+            await query.edit_message_text("✅ Switched to session. I'm back in that context now!")
+        else:
+            await query.edit_message_text("Session not found.")
 
     async def _cmd_clear(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Clear conversation history for this chat."""

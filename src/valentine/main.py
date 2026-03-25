@@ -359,6 +359,13 @@ class ProcessSupervisor:
         logger.info(f"Spawned scheduler (PID: {p.pid})")
 
     def spawn_workbench_api(self):
+        try:
+            import importlib
+            importlib.import_module("fastapi")
+            importlib.import_module("uvicorn")
+        except ImportError:
+            logger.warning("Skipping workbench API — fastapi/uvicorn not installed")
+            return
         p = multiprocessing.Process(
             target=_run_workbench_api,
             name="valentine-workbench",
@@ -384,7 +391,13 @@ class ProcessSupervisor:
                     elif name == "scheduler":
                         self.spawn_scheduler()
                     elif name == "workbench_api":
-                        self.spawn_workbench_api()
+                        # Don't restart workbench if deps are missing
+                        try:
+                            import importlib
+                            importlib.import_module("fastapi")
+                            self.spawn_workbench_api()
+                        except ImportError:
+                            logger.warning("workbench_api died and fastapi not available — not restarting")
                     else:
                         self.spawn_agent(name)
             time.sleep(5)
