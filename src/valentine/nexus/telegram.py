@@ -791,7 +791,7 @@ class TelegramAdapter(PlatformAdapter):
         try:
             # Ensure the ubuntu user owns the repo (fixes read-only .git errors)
             subprocess.run(
-                ["sudo", "chown", "-R", "ubuntu:ubuntu", "/opt/valentine/.git"],
+                ["sudo", "chown", "-R", "ubuntu:ubuntu", "/opt/valentine"],
                 capture_output=True, timeout=10,
             )
             pull_result = subprocess.run(

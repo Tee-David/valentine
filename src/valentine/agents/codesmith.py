@@ -220,6 +220,7 @@ class CodeSmithAgent(BaseAgent):
             "RULES:\n"
             "- ALWAYS include a 'respond' action as the LAST action with a natural, "
             "conversational explanation of what you did and why.\n"
+            "- NEVER output only a 'respond' action claiming you 'done' or 'executed' something if you haven't ACTUALLY used 'shell' or 'write' actions in the same response to do the work! No shortcuts!\n"
             "- Write complete, working code — never leave placeholders or TODOs.\n"
             "- If the user asks a coding QUESTION (not a task), skip shell/write actions "
             "and just respond with a thorough explanation and code examples.\n"
