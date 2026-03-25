@@ -55,7 +55,7 @@ async def _start_cloudflare_tunnel():
 
     global _tunnel_proc
     _tunnel_proc = subprocess.Popen(
-        [cloudflared, "tunnel", "--url", "http://localhost:8000"],
+        [cloudflared, "tunnel", "--url", "http://localhost:8001"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
