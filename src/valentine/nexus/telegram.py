@@ -100,6 +100,9 @@ class TelegramAdapter(PlatformAdapter):
         self.app.add_handler(CommandHandler("tts", self._cmd_tts))
         # Mini App
         self.app.add_handler(CommandHandler("workbench", self._cmd_workbench))
+        # Morning reports
+        self.app.add_handler(CommandHandler("morning", self._cmd_morning))
+        self.app.add_handler(CallbackQueryHandler(self._handle_morning_callback, pattern='^mr_'))
         # User management (admin only)
         self.app.add_handler(CommandHandler("users", self._cmd_users))
         self.app.add_handler(CommandHandler("allow", self._cmd_allow))
@@ -178,6 +181,7 @@ class TelegramAdapter(PlatformAdapter):
             BotCommand("clear", "Clear conversation history"),
             BotCommand("tts", "Get a voice reply"),
             BotCommand("workbench", "Open Project Workbench Mini App"),
+            BotCommand("morning", "Configure daily morning report"),
             BotCommand("users", "List allowed users (admin)"),
             BotCommand("allow", "Grant user access (admin)"),
             BotCommand("revoke", "Revoke user access (admin)"),
@@ -258,7 +262,8 @@ class TelegramAdapter(PlatformAdapter):
             "  /tools — List available MCP tools\n\n"
             "Scheduling:\n"
             "  /schedule <interval> <task> — Create a recurring task\n"
-            "  /jobs — List scheduled jobs\n\n"
+            "  /jobs — List scheduled jobs\n"
+            "  /morning — Configure daily morning report\n\n"
             "Memory:\n"
             "  /memory <query> — Search my memory\n"
             "  /forget <query> — Remove a memory\n"
@@ -506,6 +511,203 @@ class TelegramAdapter(PlatformAdapter):
             parse_mode="Markdown",
             reply_markup=reply_markup
         )
+
+    async def _cmd_morning(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Configure or view the daily morning report."""
+        if not self._is_admin(update.effective_user.id):
+            await update.message.reply_text("Morning reports are an admin-only feature.")
+            return
+
+        from valentine.core.scheduler import Scheduler
+        scheduler = Scheduler()
+        try:
+            chat_id = str(update.effective_chat.id)
+            existing = await scheduler.get_morning_report(chat_id)
+
+            if existing:
+                topics = ", ".join(existing.topics) if existing.topics else "None set"
+                sources = ", ".join(existing.sources) if existing.sources else "Auto"
+                status = "✅ Enabled" if existing.enabled else "⏸ Paused"
+                keyboard = [
+                    [InlineKeyboardButton("🔄 Reconfigure", callback_data="mr_reconfig")],
+                    [InlineKeyboardButton(
+                        "⏸ Pause" if existing.enabled else "▶️ Resume",
+                        callback_data="mr_toggle"
+                    )],
+                    [InlineKeyboardButton("🗑 Remove", callback_data="mr_delete")],
+                    [InlineKeyboardButton("📰 Send Now", callback_data="mr_now")],
+                ]
+                await update.message.reply_text(
+                    f"*Your Morning Report*\n\n"
+                    f"Status: {status}\n"
+                    f"⏰ Delivery: {existing.delivery_time} UTC\n"
+                    f"📋 Topics: {topics}\n"
+                    f"📡 Sources: {sources}\n\n"
+                    f"What would you like to do?",
+                    parse_mode="Markdown",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+            else:
+                # First-time setup wizard
+                keyboard = [
+                    [InlineKeyboardButton("🤖 AI / Machine Learning", callback_data="mr_topic_AI/ML"),
+                     InlineKeyboardButton("💰 Crypto / Web3", callback_data="mr_topic_Crypto")],
+                    [InlineKeyboardButton("🚀 Tech Startups", callback_data="mr_topic_Startups"),
+                     InlineKeyboardButton("💻 Programming", callback_data="mr_topic_Programming")],
+                    [InlineKeyboardButton("🌍 World News", callback_data="mr_topic_World News"),
+                     InlineKeyboardButton("📈 Finance", callback_data="mr_topic_Finance")],
+                    [InlineKeyboardButton("🔬 Science", callback_data="mr_topic_Science"),
+                     InlineKeyboardButton("🎮 Gaming", callback_data="mr_topic_Gaming")],
+                    [InlineKeyboardButton("✅ Done Selecting", callback_data="mr_topics_done")],
+                ]
+                ctx.user_data['mr_topics'] = []
+                await update.message.reply_text(
+                    "📰 *Morning Report Setup*\n\n"
+                    "I'll send you a personalized briefing every morning! "
+                    "First, select the topics you care about (tap multiple):\n\n"
+                    "_💡 Suggestion: Start with 2-3 topics. I'll also proactively include "
+                    "breaking news that might affect you even if it's outside your selected topics._",
+                    parse_mode="Markdown",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+        finally:
+            await scheduler.close()
+
+    async def _handle_morning_callback(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Handle morning report setup wizard callbacks."""
+        query = update.callback_query
+        await query.answer()
+        data = query.data
+        chat_id = str(update.effective_chat.id)
+        user = update.effective_user
+
+        if data.startswith("mr_topic_"):
+            topic = data.replace("mr_topic_", "")
+            selected = ctx.user_data.get('mr_topics', [])
+            if topic in selected:
+                selected.remove(topic)
+            else:
+                selected.append(topic)
+            ctx.user_data['mr_topics'] = selected
+
+            # Re-render the keyboard with selection markers
+            all_topics = [
+                ("🤖 AI / Machine Learning", "AI/ML"), ("💰 Crypto / Web3", "Crypto"),
+                ("🚀 Tech Startups", "Startups"), ("💻 Programming", "Programming"),
+                ("🌍 World News", "World News"), ("📈 Finance", "Finance"),
+                ("🔬 Science", "Science"), ("🎮 Gaming", "Gaming"),
+            ]
+            buttons = []
+            row = []
+            for label, key in all_topics:
+                marker = "✓ " if key in selected else ""
+                row.append(InlineKeyboardButton(f"{marker}{label}", callback_data=f"mr_topic_{key}"))
+                if len(row) == 2:
+                    buttons.append(row)
+                    row = []
+            if row:
+                buttons.append(row)
+            buttons.append([InlineKeyboardButton("✅ Done Selecting", callback_data="mr_topics_done")])
+
+            selected_str = ", ".join(selected) if selected else "None yet"
+            await query.edit_message_text(
+                f"📰 *Morning Report Setup*\n\n"
+                f"Selected: *{selected_str}*\n\n"
+                f"Tap topics to toggle them, then hit Done.",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(buttons)
+            )
+
+        elif data == "mr_topics_done":
+            selected = ctx.user_data.get('mr_topics', [])
+            if not selected:
+                await query.answer("Please select at least one topic!", show_alert=True)
+                return
+
+            from valentine.core.scheduler import Scheduler, MorningReport
+            import uuid as _uuid
+            scheduler = Scheduler()
+            try:
+                report = MorningReport(
+                    report_id=str(_uuid.uuid4())[:8],
+                    chat_id=chat_id,
+                    user_id=str(user.id),
+                    user_name=user.first_name or user.username or "",
+                    topics=selected,
+                    sources=[],  # Auto-discover
+                    delivery_time="07:00",  # Default 7 AM UTC
+                )
+                await scheduler.save_morning_report(report)
+
+                topics_str = ", ".join(selected)
+                await query.edit_message_text(
+                    f"✅ *Morning Report Configured!*\n\n"
+                    f"📋 Topics: {topics_str}\n"
+                    f"⏰ Delivery: 07:00 UTC daily\n"
+                    f"📡 Sources: Auto (I'll search the best sources)\n\n"
+                    f"_To change the delivery time, just tell me: "
+                    f"\"change my morning report to 8 AM\"_\n\n"
+                    f"_💡 Pro tip: You can also tell me specific sources like "
+                    f"\"add TechCrunch and Hacker News to my morning report\"_",
+                    parse_mode="Markdown"
+                )
+            finally:
+                await scheduler.close()
+
+        elif data == "mr_toggle":
+            from valentine.core.scheduler import Scheduler
+            scheduler = Scheduler()
+            try:
+                report = await scheduler.get_morning_report(chat_id)
+                if report:
+                    report.enabled = not report.enabled
+                    await scheduler.save_morning_report(report)
+                    status = "resumed ▶️" if report.enabled else "paused ⏸"
+                    await query.edit_message_text(f"Morning report {status}.")
+            finally:
+                await scheduler.close()
+
+        elif data == "mr_delete":
+            from valentine.core.scheduler import Scheduler
+            scheduler = Scheduler()
+            try:
+                await scheduler.delete_morning_report(chat_id)
+                await query.edit_message_text("🗑 Morning report removed. Use /morning to set up a new one.")
+            finally:
+                await scheduler.close()
+
+        elif data == "mr_now":
+            from valentine.core.scheduler import Scheduler
+            scheduler = Scheduler()
+            try:
+                report = await scheduler.get_morning_report(chat_id)
+                if report:
+                    await scheduler._deliver_morning_report(report)
+                    await query.edit_message_text("📰 Morning report is being generated! You'll receive it shortly.")
+                else:
+                    await query.edit_message_text("No morning report configured. Use /morning to set one up.")
+            finally:
+                await scheduler.close()
+
+        elif data == "mr_reconfig":
+            ctx.user_data['mr_topics'] = []
+            keyboard = [
+                [InlineKeyboardButton("🤖 AI / Machine Learning", callback_data="mr_topic_AI/ML"),
+                 InlineKeyboardButton("💰 Crypto / Web3", callback_data="mr_topic_Crypto")],
+                [InlineKeyboardButton("🚀 Tech Startups", callback_data="mr_topic_Startups"),
+                 InlineKeyboardButton("💻 Programming", callback_data="mr_topic_Programming")],
+                [InlineKeyboardButton("🌍 World News", callback_data="mr_topic_World News"),
+                 InlineKeyboardButton("📈 Finance", callback_data="mr_topic_Finance")],
+                [InlineKeyboardButton("🔬 Science", callback_data="mr_topic_Science"),
+                 InlineKeyboardButton("🎮 Gaming", callback_data="mr_topic_Gaming")],
+                [InlineKeyboardButton("✅ Done Selecting", callback_data="mr_topics_done")],
+            ]
+            await query.edit_message_text(
+                "📰 *Reconfigure Morning Report*\n\n"
+                "Select your new topics:",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
 
     async def _cmd_forget(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Delete a memory."""

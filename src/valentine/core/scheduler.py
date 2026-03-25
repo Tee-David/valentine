@@ -122,6 +122,56 @@ class Reminder:
         )
 
 
+MORNING_REPORTS_KEY = "valentine:scheduler:morning_reports"  # Hash of morning report configs
+
+
+@dataclass
+class MorningReport:
+    """A configurable daily morning report for an admin user."""
+    report_id: str
+    chat_id: str
+    user_id: str
+    user_name: str
+    topics: list[str]             # e.g. ["AI/ML", "crypto", "tech startups"]
+    sources: list[str]            # e.g. ["TechCrunch", "Hacker News", "Reddit"]
+    delivery_time: str            # HH:MM in 24h format, e.g. "08:00"
+    enabled: bool = True
+    last_delivered: float = 0.0   # timestamp of last delivery
+    custom_instructions: str = "" # additional user preferences for report style
+    created_at: float = field(default_factory=time.time)
+
+    def to_dict(self) -> dict:
+        return {
+            "report_id": self.report_id,
+            "chat_id": self.chat_id,
+            "user_id": self.user_id,
+            "user_name": self.user_name,
+            "topics": self.topics,
+            "sources": self.sources,
+            "delivery_time": self.delivery_time,
+            "enabled": self.enabled,
+            "last_delivered": self.last_delivered,
+            "custom_instructions": self.custom_instructions,
+            "created_at": self.created_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> MorningReport:
+        return cls(
+            report_id=data["report_id"],
+            chat_id=data["chat_id"],
+            user_id=data["user_id"],
+            user_name=data.get("user_name", ""),
+            topics=data.get("topics", []),
+            sources=data.get("sources", []),
+            delivery_time=data.get("delivery_time", "08:00"),
+            enabled=data.get("enabled", True),
+            last_delivered=float(data.get("last_delivered", 0)),
+            custom_instructions=data.get("custom_instructions", ""),
+            created_at=float(data.get("created_at", time.time())),
+        )
+
+
 def parse_duration(text: str) -> int | None:
     """Parse a human duration like '30s', '5 minutes', '2 hours', '1 day' into seconds.
     Returns None if unparseable.
@@ -371,6 +421,117 @@ class Scheduler:
         finally:
             await bus.close()
 
+    # -- Morning Reports CRUD ------------------------------------------
+
+    async def save_morning_report(self, report: MorningReport) -> MorningReport:
+        """Create or update a morning report configuration."""
+        await self._connect()
+        await self._redis.hset(
+            MORNING_REPORTS_KEY, report.report_id, json.dumps(report.to_dict())
+        )
+        logger.info(
+            f"Saved morning report '{report.report_id}' for chat {report.chat_id}: "
+            f"topics={report.topics}, time={report.delivery_time}"
+        )
+        return report
+
+    async def get_morning_report(self, chat_id: str) -> MorningReport | None:
+        """Get the morning report config for a specific chat."""
+        await self._connect()
+        raw = await self._redis.hgetall(MORNING_REPORTS_KEY)
+        for data in raw.values():
+            report = MorningReport.from_dict(json.loads(data))
+            if report.chat_id == chat_id:
+                return report
+        return None
+
+    async def delete_morning_report(self, chat_id: str) -> bool:
+        """Delete the morning report config for a chat."""
+        await self._connect()
+        raw = await self._redis.hgetall(MORNING_REPORTS_KEY)
+        for data in raw.values():
+            report = MorningReport.from_dict(json.loads(data))
+            if report.chat_id == chat_id:
+                await self._redis.hdel(MORNING_REPORTS_KEY, report.report_id)
+                return True
+        return False
+
+    async def _check_morning_reports(self):
+        """Check if any morning reports are due for delivery today."""
+        now = datetime.now(timezone.utc)
+        current_hhmm = now.strftime("%H:%M")
+
+        raw = await self._redis.hgetall(MORNING_REPORTS_KEY)
+        for data in raw.values():
+            report = MorningReport.from_dict(json.loads(data))
+            if not report.enabled:
+                continue
+
+            # Check if current time matches the delivery time (within 1 minute window)
+            if report.delivery_time != current_hhmm:
+                continue
+
+            # Check if already delivered today (prevent re-firing within the same minute)
+            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+            if report.last_delivered >= today_start:
+                continue
+
+            logger.info(f"Delivering morning report for chat {report.chat_id}")
+            await self._deliver_morning_report(report)
+
+            # Mark as delivered
+            report.last_delivered = time.time()
+            await self._redis.hset(
+                MORNING_REPORTS_KEY, report.report_id, json.dumps(report.to_dict())
+            )
+
+    async def _deliver_morning_report(self, report: MorningReport):
+        """Inject a morning report request into ZeroClaw for processing."""
+        from valentine.bus.redis_bus import RedisBus
+        from valentine.models import (
+            AgentName, AgentTask, ContentType, IncomingMessage,
+            MessageSource, RoutingDecision,
+        )
+
+        topics_str = ", ".join(report.topics) if report.topics else "general tech news"
+        sources_str = ", ".join(report.sources) if report.sources else "various sources"
+        custom = f" Additional instructions: {report.custom_instructions}" if report.custom_instructions else ""
+
+        instruction = (
+            f"[Morning Report] Good morning! Please search the web and compile a concise, "
+            f"well-structured morning briefing for me. "
+            f"Topics: {topics_str}. "
+            f"Preferred sources: {sources_str}. "
+            f"Format: Use emoji headers, bullet points, and keep each item to 1-2 sentences. "
+            f"Include any critical breaking news first, then trends, then interesting finds. "
+            f"End with one creative suggestion or tip I might not have thought of.{custom}"
+        )
+
+        bus = RedisBus()
+        try:
+            msg = IncomingMessage(
+                message_id=f"morning-{report.report_id}-{int(time.time())}",
+                chat_id=report.chat_id,
+                user_id=report.user_id,
+                platform=MessageSource.TELEGRAM,
+                content_type=ContentType.TEXT,
+                text=instruction,
+            )
+            task = AgentTask(
+                task_id=str(uuid.uuid4()),
+                agent=AgentName.ZEROCLAW,
+                routing=RoutingDecision(
+                    intent="morning_report", agent=AgentName.ZEROCLAW
+                ),
+                message=msg,
+            )
+            await bus.add_task(bus.ROUTER_STREAM, task.to_dict())
+            logger.info(f"Morning report injected for chat {report.chat_id}")
+        except Exception as e:
+            logger.error(f"Failed to deliver morning report: {e}")
+        finally:
+            await bus.close()
+
     # -- Execution Loop ------------------------------------------------
 
     async def run_loop(self):
@@ -388,6 +549,9 @@ class Scheduler:
 
                 # --- Check one-shot reminders (high priority) ---
                 await self._check_reminders()
+
+                # --- Check morning reports ---
+                await self._check_morning_reports()
 
                 # --- Check recurring jobs ---
                 raw = await self._redis.hgetall(JOBS_KEY)
