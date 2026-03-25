@@ -146,21 +146,31 @@ function App() {
             />
           </div>
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-tg-hint/50 p-6 text-center">
-            {status === 'loading' ? (
-               <RotateCw className="w-12 h-12 mb-4 animate-spin opacity-50 text-tg-primary" />
-            ) : (
-               <LayoutTemplate className="w-16 h-16 mb-4 opacity-40" />
+          <div className="flex-1 flex flex-col p-6 overflow-y-auto">
+            {!projectId && (
+              <div className="w-full max-w-md mx-auto mt-4">
+                <h2 className="text-xl font-bold text-tg-text mb-4 text-center">Active Projects</h2>
+                <ProjectList onSelect={(id) => {
+                  setProjectId(id);
+                  setSearchInput(id);
+                }} />
+              </div>
             )}
-            <h2 className="text-xl font-semibold text-tg-text/70 mb-2">
-              {status === 'offline' ? 'Project Offline' : 'No Project Selected'}
-            </h2>
-            <p className="text-sm max-w-sm text-tg-hint">
-              {status === 'offline' 
-                ? "The specified project doesn't have an active Cloudflare Tunnel running. Ask Valentine to preview it first."
-                : "Enter a project name above or open this app directly from a Valentine message to see live updates."
-              }
-            </p>
+            {projectId && status !== 'loading' && (
+              <div className="flex-1 flex flex-col items-center justify-center text-tg-hint/50 text-center mt-12">
+                <LayoutTemplate className="w-16 h-16 mb-4 opacity-40" />
+                <h2 className="text-xl font-semibold text-tg-text/70 mb-2">Project Offline</h2>
+                <p className="text-sm max-w-sm text-tg-hint">
+                  The project '{projectId}' doesn't have an active Cloudflare Tunnel.
+                </p>
+              </div>
+            )}
+            {projectId && status === 'loading' && (
+              <div className="flex-1 flex flex-col items-center justify-center text-tg-hint/50 text-center mt-12">
+                <RotateCw className="w-12 h-12 mb-4 animate-spin opacity-50 text-tg-primary" />
+                <h2 className="text-xl font-semibold text-tg-text/70">Connecting...</h2>
+              </div>
+            )}
           </div>
         )}
       </main>
@@ -169,6 +179,46 @@ function App() {
       <footer className="flex-none bg-tg-secondaryBg border-t border-tg-hint/20 px-4 py-1.5 flex justify-center items-center z-10 text-[10px] text-tg-hint uppercase tracking-wider font-semibold shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
         Powered by WDC Solutions
       </footer>
+    </div>
+  );
+}
+
+// Subcomponent to fetch and list projects
+function ProjectList({ onSelect }: { onSelect: (id: string) => void }) {
+  const [projects, setProjects] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`${API_URL}/api/projects`)
+      .then(res => res.json())
+      .then(data => {
+        setProjects(data.projects || []);
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error("Failed to fetch projects", err);
+        setLoading(false);
+      });
+  }, []);
+
+  if (loading) return <div className="text-center text-tg-hint animate-pulse">Loading active projects...</div>;
+  if (projects.length === 0) return <div className="text-center text-tg-hint p-4 bg-white/5 rounded-xl border border-white/10">No projects are currently running.<br/>Ask Valentine to build and preview something!</div>;
+
+  return (
+    <div className="flex flex-col gap-3">
+      {projects.map(p => (
+        <button 
+          key={p.id} 
+          onClick={() => onSelect(p.id)}
+          className="flex items-center justify-between p-4 bg-tg-secondaryBg hover:bg-white/10 border border-white/5 active:bg-tg-primary/20 rounded-2xl transition-all shadow-sm group"
+        >
+          <div className="flex items-center gap-3">
+            <div className={`w-2.5 h-2.5 rounded-full ${p.status === 'live' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)] animate-pulse' : 'bg-red-500'}`} />
+            <span className="font-semibold text-tg-text group-hover:text-tg-primary transition-colors">{p.id}</span>
+          </div>
+          <span className="text-xs px-2 py-1 bg-white/5 text-tg-hint rounded-md">Open ➔</span>
+        </button>
+      ))}
     </div>
   );
 }
