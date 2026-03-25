@@ -255,10 +255,27 @@ def _run_scheduler_process():
         )
         logger.info("Scheduler process starting...")
         asyncio.run(run())
+    except Exception as e:
+        logger.exception(f"Scheduler crashed: {e}")
+        sys.exit(1)
+
+
+def _run_workbench_api():
+    """Entry point for the Telegram Mini App API backend."""
+    import uvicorn
+    from valentine.nexus.workbench_api import app
+
+    try:
+        logging.basicConfig(
+            level=settings.log_level,
+            format="%(asctime)s - %(processName)s - %(name)s - %(levelname)s - %(message)s",
+        )
+        logger.info("Workbench API starting on port 8001...")
+        uvicorn.run(app, host="0.0.0.0", port=8001, log_level=settings.log_level.lower())
     except KeyboardInterrupt:
         pass
     except Exception as e:
-        logger.exception(f"Scheduler crashed: {e}")
+        logger.exception(f"Workbench API crashed: {e}")
         sys.exit(1)
 
 
@@ -341,6 +358,16 @@ class ProcessSupervisor:
         self.processes["scheduler"] = p
         logger.info(f"Spawned scheduler (PID: {p.pid})")
 
+    def spawn_workbench_api(self):
+        p = multiprocessing.Process(
+            target=_run_workbench_api,
+            name="valentine-workbench",
+            daemon=True,
+        )
+        p.start()
+        self.processes["workbench_api"] = p
+        logger.info(f"Spawned workbench API (PID: {p.pid})")
+
     def spawn_all(self):
         for name in AGENT_REGISTRY:
             self.spawn_agent(name)
@@ -356,6 +383,8 @@ class ProcessSupervisor:
                         self.spawn_mcp_bridge()
                     elif name == "scheduler":
                         self.spawn_scheduler()
+                    elif name == "workbench_api":
+                        self.spawn_workbench_api()
                     else:
                         self.spawn_agent(name)
             time.sleep(5)
@@ -474,6 +503,7 @@ def main():
     supervisor.spawn_bot()
     supervisor.spawn_mcp_bridge()
     supervisor.spawn_scheduler()
+    supervisor.spawn_workbench_api()
 
     health_server = _start_health_server(supervisor)
 

@@ -459,6 +459,7 @@ class CodeSmithAgent(BaseAgent):
             final_media_path = None
             final_file_name = None
             preview_url = None  # Track preview URL to inject into response
+            modified_projects = set()
 
             for action in actions:
                 act = action.get("action")
@@ -482,6 +483,10 @@ class CodeSmithAgent(BaseAgent):
                     content = action.get("content", "")
                     res = self._write_file(path, content)
                     execution_log.append(res)
+                    # Track which project was modified for live-reloading
+                    parts = os.path.normpath(path).split(os.sep)
+                    if parts and parts[0]:
+                        modified_projects.add(parts[0])
                 elif act == "skill":
                     name = action.get("name", "")
                     args = action.get("args", "")
@@ -574,6 +579,10 @@ class CodeSmithAgent(BaseAgent):
                         session = _active_sessions.get(proj_path)
                         if session:
                             preview_url = session.url
+                            # Save URL for Workbench API
+                            project_id = os.path.basename(os.path.normpath(proj_path))
+                            await self.bus.redis.set(f"valentine:workbench:preview_url:{project_id}", session.url)
+                            modified_projects.add(project_id)
                     except RuntimeError as e:
                         execution_log.append(f"[preview] Error: {e}")
                 elif act == "stop_preview":
@@ -631,6 +640,18 @@ class CodeSmithAgent(BaseAgent):
             # Inject preview URL into the response if the LLM didn't mention it
             if preview_url and "trycloudflare.com" not in final_response:
                 final_response += f"\n\nHere's your live preview: {preview_url}"
+
+            # Fire SSE reload events for modified projects
+            if modified_projects:
+                import json
+                for proj in modified_projects:
+                    try:
+                        await self.bus.redis.publish(
+                            f"valentine:workbench:events:{proj}", 
+                            json.dumps({"action": "reload"})
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to publish reload event for {proj}: {e}")
 
             # User sees only the respond text — execution details stay in logs
             out_txt = final_response
