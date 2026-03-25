@@ -72,9 +72,11 @@ Automatic **fallback chains**: if one provider is rate-limited, requests route t
 - **Dual-Layer Memory** — Private facts stay isolated per-user. Procedural knowledge (HOW-TOs, environment fixes, capability discoveries) is PII-scrubbed by the LLM and stored in a global namespace. ZeroClaw merges both layers to enrich routing decisions without exposing sensitive data.
 - **Self-Learning Skills** — Valentine can autonomously research new technologies using its `self-learning` skill and write reusable `SKILL.md` instruction files into `.agents/skills/`.
 
-### Conversation Management
+### Conversation & UI Management
 - **Telegram Sessions** — Multiple conversation threads per user, like ChatGPT. Use `/new [name]` to start a project context, `/conversations` to list, `/resume <id>` to switch.
+- **Project Workbench (Mini App)** — A rich React+Vite frontend embedded natively in Telegram as a Mini App. Allows you to view live previews of generated web apps, interact with agent dashboards, and view streaming logs without leaving the chat.
 - **Interactive Tour** — `/tour` opens a segmented, button-driven onboarding walkthrough using Telegram Inline Keyboards.
+- **Morning Reports** — Configurable, scheduled news briefings. Setting up topics via the `/morning` wizard enables Valentine to autonomously search the web and send a curated digest every morning.
 
 ### Tools & Integrations
 - **Weather** — Real-time weather data via Open-Meteo (no API key needed)
@@ -121,6 +123,8 @@ Automatic **fallback chains**: if one provider is rate-limited, requests route t
 | `/resume <id>` | Switch to a previous session |
 | `/schedule` | Create a recurring scheduled task |
 | `/jobs` | List active scheduled jobs |
+| `/morning` | Configure customized daily morning reports |
+| `/workbench` | Open the Valentine Project Workbench (Telegram Mini App) |
 | `/memory` | Search Valentine's long-term memory |
 | `/forget` | Remove a specific memory |
 | `/clear` | Clear conversation history (keeps long-term memory) |

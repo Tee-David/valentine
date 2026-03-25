@@ -1411,6 +1411,10 @@ class TelegramAdapter(PlatformAdapter):
         if task and not task.done():
             task.cancel()
 
+    async def send_typing(self, chat_id: str) -> None:
+        """Start the background typing loop. (Required by abstract PlatformAdapter)"""
+        self.start_typing_loop(chat_id)
+
     # ------------------------------------------------------------------
     # Rate limiting & retry
     # ------------------------------------------------------------------
