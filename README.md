@@ -85,9 +85,10 @@ Automatic **fallback chains**: if one provider is rate-limited, requests route t
 - **Codebase RAG** — Semantic code search over project files. Index any directory with `index_codebase`, then query with `rag_search`.
 
 ### OpenClaw-Grade Connectivity (MCP)
-- **GitHub** — Full repository management via `@modelcontextprotocol/server-github` (auto-configured when `GITHUB_PERSONAL_ACCESS_TOKEN` is set)
-- **Brave Search** — Real-time web search via `@modelcontextprotocol/server-brave-search` (auto-configured when `BRAVE_API_KEY` is set)
-- **Extensible** — Any MCP server can be added by dropping its config into the `MCP_SERVERS` env var or setting the appropriate API key
+- **GitHub** — Repo-scoped access via `@modelcontextprotocol/server-github`. Set `GITHUB_REPOS=owner/repo1,owner/repo2` to whitelist specific repos.
+- **SearXNG** — Free, self-hosted meta-search engine (replaces paid Brave). Set `SEARXNG_URL` to your instance.
+- **Built-in Web Search** — DuckDuckGo search is always available for free via the Oracle agent (no MCP needed).
+- **Extensible** — Any MCP server can be added by dropping its config into the `MCP_SERVERS` env var.
 
 ### Isolation & Scheduling
 - **Docker Sandbox** — CodeSmith can run untrusted code in isolated Docker containers with hard memory (256MB) and CPU (0.5) limits. Containers auto-destroy after execution.
@@ -257,7 +258,8 @@ TELEGRAM_BOT_TOKEN=your_telegram_bot_token
 
 # Optional — MCP Integrations (auto-configured when set)
 GITHUB_PERSONAL_ACCESS_TOKEN=ghp_your_token
-BRAVE_API_KEY=your_brave_key
+GITHUB_REPOS=Tee-David/valentine,Tee-David/other-repo
+SEARXNG_URL=http://localhost:8888
 
 # Optional — System
 REDIS_URL=redis://localhost:6379/0
@@ -381,8 +383,9 @@ mypy src/valentine/
 ## MCP Server Configuration
 
 Valentine **auto-discovers** MCP servers based on environment variables:
-- Set `GITHUB_PERSONAL_ACCESS_TOKEN` → GitHub MCP activates automatically
-- Set `BRAVE_API_KEY` → Brave Search MCP activates automatically
+- Set `GITHUB_PERSONAL_ACCESS_TOKEN` + `GITHUB_REPOS=owner/repo1,owner/repo2` → GitHub MCP activates, scoped to only those repos
+- Set `SEARXNG_URL=http://localhost:8888` → Free meta-search MCP activates
+- Valentine also has **free DuckDuckGo search built-in** (no API key needed) via the Oracle agent
 
 You can also manually configure additional servers via the `MCP_SERVERS` env var:
 

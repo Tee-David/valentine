@@ -8,21 +8,29 @@ from pydantic import Field
 class Settings(BaseSettings):
     def _get_default_mcp_servers() -> dict:
         servers = {}
-        if os.getenv("GITHUB_PERSONAL_ACCESS_TOKEN"):
+        pat = os.getenv("GITHUB_PERSONAL_ACCESS_TOKEN")
+        if pat:
+            # Scope GitHub access to specific repos only (comma-separated)
+            # e.g. GITHUB_REPOS=Tee-David/valentine,Tee-David/my-app
+            gh_env = {"GITHUB_PERSONAL_ACCESS_TOKEN": pat}
+            repos = os.getenv("GITHUB_REPOS", "")
+            if repos:
+                # The GitHub MCP respects GITHUB_REPOSITORY for scoping
+                gh_env["GITHUB_REPOSITORY"] = repos
             servers["github"] = {
                 "command": "npx",
                 "args": ["-y", "@modelcontextprotocol/server-github"],
-                "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": os.getenv("GITHUB_PERSONAL_ACCESS_TOKEN")}
+                "env": gh_env,
             }
-        if os.getenv("BRAVE_API_KEY"):
-            servers["brave"] = {
+        # SearXNG — free, self-hosted meta-search (replaces paid Brave)
+        # Set SEARXNG_URL to your instance, e.g. http://localhost:8888
+        searxng_url = os.getenv("SEARXNG_URL")
+        if searxng_url:
+            servers["searxng"] = {
                 "command": "npx",
-                "args": ["-y", "@modelcontextprotocol/server-brave-search"],
-                "env": {"BRAVE_API_KEY": os.getenv("BRAVE_API_KEY")}
+                "args": ["-y", "@modelcontextprotocol/server-searxng"],
+                "env": {"SEARXNG_URL": searxng_url},
             }
-        if os.getenv("GOOGLE_IMAP_PASSWORD"):
-            # A placeholder for future Google services that we'd want to load natively
-            pass
         return servers
 
     # API Keys
