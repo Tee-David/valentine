@@ -239,7 +239,7 @@ class IrisAgent(BaseAgent):
 
             # --- Fallback: text-only question about images/vision ---
             messages = [{"role": "system", "content": self.system_prompt}]
-            messages.extend(history[:-1])
+            messages.extend(history)
             messages.append({"role": "user", "content": target_prompt})
 
             text_response = await self.llm.chat_completion(messages)

@@ -5,7 +5,7 @@ import asyncio
 import logging
 import time
 from typing import AsyncGenerator, Dict, Any, List
-from .provider import LLMProvider
+from .provider import LLMProvider, MultimodalProvider
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +14,10 @@ _CIRCUIT_OPEN_DURATION = 15  # seconds
 _PER_PROVIDER_TIMEOUT = 25  # seconds — max time to wait for a single provider
 
 
-class FallbackChain(LLMProvider):
+class FallbackChain(MultimodalProvider):
+    """Wraps multiple LLM providers with automatic failover and circuit breakers.
+    Also implements MultimodalProvider by delegating to the first capable provider.
+    """
     def __init__(self, providers: List[LLMProvider]):
         self.providers = providers
         # Track when each provider last failed: provider_name → timestamp
@@ -139,3 +142,39 @@ class FallbackChain(LLMProvider):
             "I'm having trouble connecting to my AI providers right now. "
             "Please try again in a moment!"
         )
+
+    async def image_completion(
+        self,
+        prompt: str,
+        image_url_or_base64: str,
+        model: str | None = None,
+        **kwargs: Any
+    ) -> str:
+        """Delegate vision/image analysis to the first MultimodalProvider in the chain."""
+        last_exception = None
+        for provider in self.providers:
+            if not isinstance(provider, MultimodalProvider):
+                continue
+            if self._is_circuit_open(provider):
+                logger.info(f"Skipping {provider.provider_name} for vision (circuit open)")
+                continue
+            try:
+                result = await asyncio.wait_for(
+                    provider.image_completion(prompt, image_url_or_base64, model=model, **kwargs),
+                    timeout=_PER_PROVIDER_TIMEOUT,
+                )
+                self._close_circuit(provider)
+                return result
+            except asyncio.TimeoutError:
+                self._trip_circuit(provider)
+                logger.warning(f"Vision provider {provider.provider_name} timed out")
+                last_exception = TimeoutError(f"{provider.provider_name} vision timed out")
+            except Exception as e:
+                self._trip_circuit(provider)
+                logger.warning(f"Vision provider {provider.provider_name} failed: {e}")
+                last_exception = e
+        raise Exception(
+            "I can't analyze images right now — all vision providers are unavailable. "
+            "Please try again in a moment!"
+        )
+

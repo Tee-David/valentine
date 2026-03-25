@@ -227,7 +227,7 @@ class OracleAgent(BaseAgent):
 
         # Build messages with history
         messages = [{"role": "system", "content": self.system_prompt}]
-        messages.extend(history[:-1])  # history minus the message we just added
+        messages.extend(history)  # previously was history[:-1] which deleted context
 
         # When the user asks about Valentine's identity or capabilities,
         # inject a reminder so the LLM answers from its actual capability list
@@ -246,7 +246,33 @@ class OracleAgent(BaseAgent):
         messages.append({"role": "user", "content": user_content})
 
         try:
-            response_text = await self.llm.chat_completion(messages)
+            # Use reasoning model (QWQ-32B) for complex analytical queries
+            reasoning_model = None
+            _REASONING_SIGNALS = {
+                "explain why", "analyze", "compare", "prove",
+                "step by step", "reason", "think through",
+                "what would happen if", "break down", "evaluate",
+                "logic", "argument", "hypothesis", "calculate",
+                "solve", "derive", "deduce",
+            }
+            lower_prompt = target_prompt.lower()
+            if (
+                intent in ("reasoning", "analysis", "complex_question")
+                or any(s in lower_prompt for s in _REASONING_SIGNALS)
+            ):
+                reasoning_model = settings.groq_reasoning_model
+                logger.info(f"Oracle using reasoning model: {reasoning_model}")
+
+            response_text = await self.llm.chat_completion(
+                messages, model=reasoning_model,
+            )
+
+            # Strip <think>...</think> blocks from reasoning models
+            if reasoning_model and "<think>" in response_text:
+                import re as _re
+                response_text = _re.sub(
+                    r"<think>.*?</think>\s*", "", response_text, flags=_re.DOTALL,
+                ).strip()
 
             # Save assistant response to history
             if chat_id:

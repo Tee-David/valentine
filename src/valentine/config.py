@@ -8,7 +8,7 @@ from pydantic import Field
 class Settings(BaseSettings):
     def _get_default_mcp_servers() -> dict:
         servers = {}
-        pat = os.getenv("GITHUB_PERSONAL_ACCESS_TOKEN")
+        pat = os.getenv("GITHUB_PERSONAL_ACCESS_TOKEN") or os.getenv("GITHUB_PAT")
         if pat:
             # Scope GitHub access to specific repos only (comma-separated)
             # e.g. GITHUB_REPOS=Tee-David/valentine,Tee-David/my-app

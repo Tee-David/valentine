@@ -160,24 +160,31 @@ class CodeSmithAgent(BaseAgent):
             "to give them a live HTTPS link they can open on their phone.\n\n"
             "PROJECT WORKSPACE:\n"
             f"Your workspace is {self.workspace}. EACH PROJECT gets its OWN SUBFOLDER.\n"
-            "- If the user says 'build a calculator app', create it in a folder like "
-            f"'{self.workspace}/calculator-app/'\n"
-            "- If they say 'build a to-do list', create it in "
-            f"'{self.workspace}/todo-list-app/'\n"
-            "- If the user asks to MODIFY an existing project, check what folders exist "
-            "and edit the files IN THAT FOLDER. Do NOT recreate from scratch.\n"
+            "- BEFORE building anything, ALWAYS run: {\"action\": \"shell\", \"command\": \"ls -la\"} "
+            "to see what projects already exist.\n"
+            "- If a matching project folder exists, cd into it and READ the existing files before "
+            "making changes. NEVER recreate from scratch.\n"
+            "- If the user says 'build a calculator app' and calculator-app/ already exists, "
+            "ask what they want changed instead of rebuilding.\n"
+            f"- New projects go in subfolders like '{self.workspace}/calculator-app/'\n"
             "- When using the 'preview' action, set 'path' to the PROJECT SUBFOLDER, "
             f"not the root workspace. E.g. 'path': '{self.workspace}/calculator-app'\n"
+            "- Each project can have its OWN Cloudflare Tunnel running simultaneously.\n"
+            "- If a preview is already running for a project, the old one is stopped and a "
+            "new one is started automatically when you run 'preview' again.\n"
             "- To see what projects exist, use: {\"action\": \"shell\", \"command\": \"ls -la\"}\n"
-            "- When the user says 'change X' or 'make it Y', FIRST read the existing files, "
-            "THEN modify them, THEN restart the preview. Do NOT rewrite from scratch.\n\n"
+            "- When the user says 'change X' or 'make it Y':\n"
+            "  1. FIRST: list files in the project folder\n"
+            "  2. THEN: read the relevant files\n"
+            "  3. THEN: write ONLY the modified files\n"
+            "  4. THEN: restart the preview to apply changes\n"
+            "  Do NOT rewrite from scratch. Edit surgically.\n\n\n"
             "CRITICAL RULES — FOLLOW EXACTLY:\n"
             "1. NEVER use tkinter, PyQt, or any desktop GUI library. You are on a headless "
             "server with no display. ALWAYS build web apps using Flask, FastAPI, or plain "
             "HTML+JS files served with 'python3 -m http.server'.\n"
             "2. When you build a web app, use the 'preview' action to give the user a live "
-            "HTTPS link. The preview action auto-creates a Cloudflare Tunnel — do NOT say "
-            "you can't host or serve URLs. Just use the action.\n"
+            "HTTPS link. The preview action auto-creates a Cloudflare Tunnel.\n"
             "3. Keep your 'respond' text to 2-3 SHORT sentences. No bullet lists. No code. "
             "No technical details. Just: what you built + the link if applicable.\n"
             "4. When writing files, keep code CONCISE. Under 80 lines. Do not over-engineer.\n"
@@ -393,7 +400,7 @@ class CodeSmithAgent(BaseAgent):
 
         # Build messages with history
         messages = [{"role": "system", "content": self.system_prompt}]
-        messages.extend(history[:-1])  # history minus the message we just added
+        messages.extend(history)  # full history for context
 
         # Include reply context if the user is replying to a message
         user_content = target_prompt
@@ -616,7 +623,10 @@ class CodeSmithAgent(BaseAgent):
 
             # If LLM didn't include a respond action, summarize what happened
             if not final_response:
-                final_response = "Done! I executed your request."
+                if execution_log:
+                    final_response = "Here are the execution results:\n\n" + "\n".join(execution_log)
+                else:
+                    final_response = "I couldn't process that. No tools were executed."
 
             # Inject preview URL into the response if the LLM didn't mention it
             if preview_url and "trycloudflare.com" not in final_response:

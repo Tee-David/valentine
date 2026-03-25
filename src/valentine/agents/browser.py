@@ -316,13 +316,30 @@ class BrowserAgent(BaseAgent):
                     await context.close()
 
             if not final_response:
-                final_response = "Here's what I found:"
+                final_response = "Here's what I found."
 
-            # Build output
+            # If we actually fetched or scraped data, ground the response to avoid hallucinations
+            # because the first LLM pass generated 'respond' before seeing the page content.
             if execution_log:
-                out_txt = final_response + "\n\n" + "\n\n".join(execution_log)
-            else:
-                out_txt = final_response
+                log_text = "\n".join(execution_log)
+                logger.info("Browser execution log:\n%s", log_text)
+                
+                # Ground the response with a second LLM call
+                summary_prompt = (
+                    f"You are navigating the web for the user's request: '{target_prompt}'.\n"
+                    f"Here is the raw data you just fetched:\n\n{log_text[:6000]}\n\n"
+                    f"Based ONLY on this data, provide a helpful and natural response to the user. "
+                    f"Do not mention code or raw data forms, just give them the answer."
+                )
+                try:
+                    final_response = await self.llm.chat_completion(
+                        [{"role": "user", "content": summary_prompt}], temperature=0.3
+                    )
+                except Exception as e:
+                    logger.error(f"Browser second pass summarization failed: {e}")
+                    final_response = "I fetched the page but couldn't summarize it properly."
+
+            out_txt = final_response
 
             if chat_id:
                 await self.bus.append_history(chat_id, "assistant", out_txt[:500])

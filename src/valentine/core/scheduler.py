@@ -124,11 +124,12 @@ class Reminder:
 
 def parse_duration(text: str) -> int | None:
     """Parse a human duration like '30s', '5 minutes', '2 hours', '1 day' into seconds.
-
     Returns None if unparseable.
     """
     text = text.lower().strip()
-    match = re.match(
+    # Remove leading words like "in"
+    text = re.sub(r"^in\s+", "", text).strip()
+    match = re.search(
         r"(\d+)\s*(s|sec|seconds?|m|min|minutes?|h|hr|hours?|d|days?)",
         text,
     )

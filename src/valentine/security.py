@@ -80,6 +80,17 @@ _SENSITIVE_OUTPUT_PATTERNS: list[tuple[re.Pattern, str]] = [
 ]
 
 
+def detect_secrets(text: str) -> bool:
+    """Return True if the text appears to contain an API key or secret."""
+    if not text:
+        return False
+    for pat, _ in _SENSITIVE_OUTPUT_PATTERNS:
+        if pat.search(text):
+            logger.warning("Secret pattern detected in input: %s", pat.pattern)
+            return True
+    return False
+
+
 def sanitise_output(text: str) -> str:
     """Scrub any accidentally leaked secrets, internal URLs, and tracebacks from agent output."""
     if text is None:

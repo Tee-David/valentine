@@ -239,6 +239,8 @@ No markdown. No explanation. JSON only."""
                 target_agent = AgentName.IRIS
             elif content_type == ContentType.VOICE:
                 target_agent = AgentName.ECHO
+            elif msg.text and (msg.text.strip().startswith("/tts") or "voice note" in msg.text.lower()):
+                target_agent = AgentName.ECHO
             elif target_agent == AgentName.ORACLE and msg.text and _CODESMITH_PATTERNS.search(msg.text):
                 # Keyword override: LLM said Oracle but the message clearly needs CodeSmith
                 logger.info(f"ZeroClaw keyword override: Oracle → CodeSmith for: {msg.text[:80]}")

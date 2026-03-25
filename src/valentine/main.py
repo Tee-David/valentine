@@ -418,6 +418,37 @@ def _start_health_server(supervisor: ProcessSupervisor, port: int = 8080):
 # Main
 # ------------------------------------------------------------------
 
+def _validate_secrets() -> dict[str, bool]:
+    """Check all required secrets at startup and return availability map.
+    Logs warnings for missing secrets so operators know what's misconfigured.
+    """
+    import os
+    secrets_map = {
+        "GROQ_API_KEY": bool(settings.groq_api_key),
+        "CEREBRAS_API_KEY": bool(settings.cerebras_api_key),
+        "SAMBANOVA_API_KEY": bool(settings.sambanova_api_key),
+        "TELEGRAM_BOT_TOKEN": bool(settings.telegram_bot_token),
+        "GITHUB_PAT": bool(os.getenv("GITHUB_PERSONAL_ACCESS_TOKEN") or os.getenv("GITHUB_PAT")),
+        "REDIS_URL": bool(settings.redis_url),
+    }
+
+    available = [k for k, v in secrets_map.items() if v]
+    missing = [k for k, v in secrets_map.items() if not v]
+
+    if available:
+        logger.info("✅ Available integrations: %s", ", ".join(available))
+    if missing:
+        logger.warning("⚠️  Missing secrets (features disabled): %s", ", ".join(missing))
+
+    # Critical check — can't run without at least one LLM and the bot token
+    if not any([secrets_map["GROQ_API_KEY"], secrets_map["CEREBRAS_API_KEY"], secrets_map["SAMBANOVA_API_KEY"]]):
+        logger.critical("❌ No LLM API keys configured! Valentine cannot function.")
+    if not secrets_map["TELEGRAM_BOT_TOKEN"]:
+        logger.critical("❌ No TELEGRAM_BOT_TOKEN! Bot will not start.")
+
+    return secrets_map
+
+
 def main():
     supervisor = ProcessSupervisor()
 
@@ -429,6 +460,9 @@ def main():
     signal.signal(signal.SIGTERM, handle_sigterm)
 
     logger.info("Valentine process supervisor started.")
+
+    # Validate secrets before anything else
+    _validate_secrets()
 
     # Pre-populate Tool Registry with installed skills before agents start
     try:

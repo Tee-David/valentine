@@ -73,10 +73,15 @@ class MCPManager:
         if self._exit_stack is None:
             raise RuntimeError("MCPManager.start() must be called before connecting servers")
 
+        import os
+        merged_env = os.environ.copy()
+        if config.get("env"):
+            merged_env.update(config["env"])
+
         server_params = StdioServerParameters(
             command=config["command"],
             args=config.get("args", []),
-            env=config.get("env"),
+            env=merged_env,
         )
 
         logger.info("Connecting to MCP server '%s' (command=%s) ...", name, config["command"])

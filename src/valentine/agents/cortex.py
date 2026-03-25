@@ -151,26 +151,22 @@ When extracting memories, categorize them:
             if intent == "store_memory" or intent == "chat":
                 agent_response = task.routing.params.get("agent_response", "")
                 await self._extract_memories(msg, agent_response=agent_response)
-                return TaskResult(task_id=task.task_id, agent=self.name, success=True,
-                                text="Memory extracted and stored.")
+                return TaskResult(task_id=task.task_id, agent=self.name, success=True, text="")
 
             elif intent == "store_capability":
                 cap = msg.text or task.routing.params.get("capability", "")
                 await self.store_capability(msg.user_id, cap)
-                return TaskResult(task_id=task.task_id, agent=self.name, success=True,
-                                text="Capability stored.")
+                return TaskResult(task_id=task.task_id, agent=self.name, success=True, text="")
 
             elif intent == "store_constraint":
                 constraint = msg.text or task.routing.params.get("constraint", "")
                 await self.store_constraint(msg.user_id, constraint)
-                return TaskResult(task_id=task.task_id, agent=self.name, success=True,
-                                text="Constraint stored.")
+                return TaskResult(task_id=task.task_id, agent=self.name, success=True, text="")
 
             elif intent == "store_environment":
                 env = msg.text or task.routing.params.get("environment", "")
                 await self.store_environment(msg.user_id, env)
-                return TaskResult(task_id=task.task_id, agent=self.name, success=True,
-                                text="Environment snapshot stored.")
+                return TaskResult(task_id=task.task_id, agent=self.name, success=True, text="")
 
             elif intent == "search_memory":
                 results = self.memory.search(msg.text, user_id=msg.user_id, limit=5)

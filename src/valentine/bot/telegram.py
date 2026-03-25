@@ -29,7 +29,16 @@ class TelegramBot:
         self.app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, self.handle_voice))
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("Hey! I'm Valentine — your AI assistant. How can I help you today?")
+        from telegram import ReplyKeyboardMarkup
+        keyboard = [
+            ["/tour 🚀", "/skills 🛠️"],
+            ["/status 📊", "Clear Memory 🧹"]
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        await update.message.reply_text(
+            "Hey! I'm Valentine — your AI assistant. How can I help you today?",
+            reply_markup=reply_markup
+        )
 
     async def _route_message(self, update: Update, content_type: ContentType, text: str, media_path: str = None):
         msg = IncomingMessage(

@@ -29,7 +29,9 @@ from valentine.nexus.adapter import PlatformAdapter
 from valentine.access import AccessControl
 from valentine.core.scheduler import Scheduler, parse_duration
 from valentine.security import (
-    sanitise_input, detect_injection, validate_media_extension,
+    sanitise_input, sanitise_output, detect_injection, detect_secrets,
+    is_self_awareness_query, validate_media_extension,
+    MAX_MEDIA_SIZE_MB
 )
 
 logger = logging.getLogger(__name__)
@@ -54,6 +56,7 @@ class TelegramAdapter(PlatformAdapter):
         self._last_error: dict[str, tuple[str, float]] = {}  # chat_id → (error_key, timestamp)
         self._response_task: asyncio.Task | None = None
         self._access: AccessControl | None = None  # initialized on start()
+        self._typing_tasks: dict[str, asyncio.Task] = {}  # chat_id -> typing loop task
         self._setup_handlers()
 
     # ------------------------------------------------------------------
@@ -218,11 +221,20 @@ class TelegramAdapter(PlatformAdapter):
 
     async def _cmd_start(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         from valentine.identity import PRODUCT_NAME, CODENAME, COMPANY_NAME, CEO_NAME
+        from telegram import ReplyKeyboardMarkup
+        keyboard = [
+            ["/tour 🚀", "/help ❓"],
+            ["/status 📊", "/conversations 💬"],
+            ["/skills 🛠️", "/tools 🧰"],
+            ["Clear Memory 🧹"]
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         await update.message.reply_text(
             f"Hey! I'm {PRODUCT_NAME} ({CODENAME}) — your multi-agent AI assistant, "
             f"built by {COMPANY_NAME} under the leadership of {CEO_NAME}.\n\n"
             "Send me anything — text, photos, voice, documents.\n"
-            "Type /help to see all available commands."
+            "Use the buttons below to explore, or type /help for a full list of commands.",
+            reply_markup=reply_markup
         )
 
     async def _cmd_help(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -796,8 +808,8 @@ class TelegramAdapter(PlatformAdapter):
             logger.info(f"Dedup: skipping already-processed update {update_id}")
             return
 
-        # --- Send typing AFTER dedup+stale checks pass (prevents ghost typing) ---
-        await self.send_typing(str(update.effective_chat.id))
+        # --- Start typing loop AFTER dedup+stale checks pass ---
+        self.start_typing_loop(str(update.effective_chat.id))
 
         # --- Access control gate ---
         user_id = str(update.effective_user.id)
@@ -861,20 +873,34 @@ class TelegramAdapter(PlatformAdapter):
         except Exception as e:
             logger.error(f"Failed to route message {msg.message_id}: {e}")
 
-    # Reminder pattern: "remind me in 30s to buy a boat"
-    _REMINDER_PATTERN = re.compile(
+    # Reminder patterns:
+    #   "remind me in 5m to buy milk"
+    #   "remind me to buy milk in 5 minutes"
+    _REMINDER_RE_A = re.compile(
         r"remind\s+me\s+in\s+(\d+\s*(?:s|sec|seconds?|m|min|minutes?|h|hr|hours?|d|days?))\s+(?:to\s+)?(.+)",
+        re.IGNORECASE,
+    )
+    _REMINDER_RE_B = re.compile(
+        r"remind\s+me\s+(?:to\s+)?(.+?)\s+in\s+(\d+\s*(?:s|sec|seconds?|m|min|minutes?|h|hr|hours?|d|days?))\s*$",
         re.IGNORECASE,
     )
 
     async def _try_create_reminder(self, update: Update, text: str) -> bool:
         """Check if the message is a reminder request. Returns True if handled."""
-        match = self._REMINDER_PATTERN.search(text)
-        if not match:
-            return False
+        # Try pattern A: "remind me in 5m to buy milk"
+        match = self._REMINDER_RE_A.search(text)
+        if match:
+            duration_str = match.group(1).strip()
+            reminder_msg = match.group(2).strip()
+        else:
+            # Try pattern B: "remind me to buy milk in 5 minutes"
+            match = self._REMINDER_RE_B.search(text)
+            if match:
+                reminder_msg = match.group(1).strip()
+                duration_str = match.group(2).strip()
+            else:
+                return False  # Not a reminder — let the LLM handle it
 
-        duration_str = match.group(1).strip()
-        reminder_msg = match.group(2).strip()
         delay = parse_duration(duration_str)
         if not delay:
             return False
@@ -967,6 +993,9 @@ class TelegramAdapter(PlatformAdapter):
         if not result.chat_id:
             logger.warning(f"Result {result.task_id} has no chat_id — dropping.")
             return
+
+        # Stop typing loop once we have a result for this chat
+        self.stop_typing_loop(result.chat_id)
 
         await self._rate_limit(result.chat_id)
 
@@ -1073,11 +1102,30 @@ class TelegramAdapter(PlatformAdapter):
     # Typing indicator
     # ------------------------------------------------------------------
 
-    async def send_typing(self, chat_id: str) -> None:
+    async def _typing_loop(self, chat_id: str) -> None:
+        """Continuously refresh the typing indicator every 4 seconds (max 5 minutes)."""
+        import time
+        timeout_at = time.time() + 300
         try:
-            await self.app.bot.send_chat_action(chat_id=chat_id, action="typing")
-        except Exception:
-            pass  # best-effort
+            while time.time() < timeout_at:
+                try:
+                    await self.app.bot.send_chat_action(chat_id=chat_id, action="typing")
+                except Exception:
+                    pass  # best-effort
+                await asyncio.sleep(4.0)
+        except asyncio.CancelledError:
+            pass  # Task cancelled when result arrives
+
+    def start_typing_loop(self, chat_id: str) -> None:
+        """Start a background task to keep the typing indicator active."""
+        self.stop_typing_loop(chat_id)
+        self._typing_tasks[chat_id] = asyncio.create_task(self._typing_loop(chat_id))
+
+    def stop_typing_loop(self, chat_id: str) -> None:
+        """Cancel the typing loop for a chat."""
+        task = self._typing_tasks.pop(chat_id, None)
+        if task and not task.done():
+            task.cancel()
 
     # ------------------------------------------------------------------
     # Rate limiting & retry
