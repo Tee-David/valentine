@@ -192,9 +192,14 @@ class CodeSmithAgent(BaseAgent):
             f"INSTALLED SKILLS (bash scripts you can run via shell action):\n{skills_list}\n"
             f"Skills directory: {self.skills_dir}\n"
             f"Built-in skills: {self.skills_builtin_dir}\n"
-            "To run a skill: {{\"action\": \"skill\", \"name\": \"skill-name\", \"args\": \"subcommand arg1 arg2\"}}\n"
-            "To install a skill: {{\"action\": \"skill_install\", \"name\": \"skill-name\"}}\n"
-            "To list skills: {{\"action\": \"skill_list\"}}\n"
+            "To run a script skill: {{\"action\": \"skill\", \"name\": \"skill-name\", \"args\": \"subcommand\"}}\n"
+            "To install a script skill: {{\"action\": \"skill_install\", \"name\": \"skill-name\"}}\n"
+            "To list all active skills/rules: {{\"action\": \"skill_list\"}}\n"
+            "To ADD a global custom instruction/rule for yourself permanently:\n"
+            f"  1. {{\"action\": \"shell\", \"command\": \"mkdir -p {self.skills_dir}/<rule-name>\"}}\n"
+            f"  2. {{\"action\": \"write\", \"path\": \"{self.skills_dir}/<rule-name>/SKILL.md\", \"content\": \"detailed markdown rules...\"}}\n"
+            "To REMOVE a custom instruction/rule:\n"
+            f"  {{\"action\": \"shell\", \"command\": \"rm -rf {self.skills_dir}/<rule-name>\"}}\n"
             + mcp_section +
             "\nRESPONSE FORMAT — respond with a JSON array of actions:\n"
             '  {"action": "shell", "command": "npm init -y"}\n'
