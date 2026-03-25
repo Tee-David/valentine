@@ -98,6 +98,8 @@ class TelegramAdapter(PlatformAdapter):
         self.app.add_handler(CommandHandler("clear", self._cmd_clear))
         # Voice
         self.app.add_handler(CommandHandler("tts", self._cmd_tts))
+        # Mini App
+        self.app.add_handler(CommandHandler("workbench", self._cmd_workbench))
         # User management (admin only)
         self.app.add_handler(CommandHandler("users", self._cmd_users))
         self.app.add_handler(CommandHandler("allow", self._cmd_allow))
@@ -172,6 +174,7 @@ class TelegramAdapter(PlatformAdapter):
             BotCommand("forget", "Remove a memory"),
             BotCommand("clear", "Clear conversation history"),
             BotCommand("tts", "Get a voice reply"),
+            BotCommand("workbench", "Open Project Workbench Mini App"),
             BotCommand("users", "List allowed users (admin)"),
             BotCommand("allow", "Grant user access (admin)"),
             BotCommand("revoke", "Revoke user access (admin)"),
@@ -479,6 +482,27 @@ class TelegramAdapter(PlatformAdapter):
                 parse_mode="Markdown",
                 reply_markup=reply_markup
             )
+
+    async def _cmd_workbench(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Open the Project Workbench Telegram Mini App."""
+        from telegram import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+        import os
+        
+        # The MiniApp must be served over HTTPS. We check an environment variable first.
+        workbench_url = os.environ.get("VALENTINE_WORKBENCH_URL", "https://valentine-workbench.vercel.app")
+        
+        keyboard = [
+            [InlineKeyboardButton(
+                text="🚀 Open Workbench", 
+                web_app=WebAppInfo(url=workbench_url)
+            )]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(
+            "Launch the *Project Workbench* below to view live previews of your current apps:",
+            parse_mode="Markdown",
+            reply_markup=reply_markup
+        )
 
     async def _cmd_forget(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Delete a memory."""

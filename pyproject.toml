@@ -24,6 +24,9 @@ dependencies = [
     "tomli>=2.0; python_version < '3.11'",
     "mem0ai>=1.0",
     "mcp>=1.0",
+    "fastapi>=0.100",
+    "uvicorn>=0.25",
+    "sse-starlette>=2.0",
 ]
 
 [project.optional-dependencies]
