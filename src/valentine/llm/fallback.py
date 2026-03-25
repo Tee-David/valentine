@@ -1,6 +1,7 @@
 # src/valentine/llm/fallback.py
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import AsyncGenerator, Dict, Any, List
@@ -9,7 +10,8 @@ from .provider import LLMProvider
 logger = logging.getLogger(__name__)
 
 # Circuit breaker: skip a provider for this many seconds after a failure
-_CIRCUIT_OPEN_DURATION = 30  # seconds
+_CIRCUIT_OPEN_DURATION = 15  # seconds
+_PER_PROVIDER_TIMEOUT = 25  # seconds — max time to wait for a single provider
 
 
 class FallbackChain(LLMProvider):
@@ -57,15 +59,22 @@ class FallbackChain(LLMProvider):
         **kwargs: Any
     ) -> str:
         try:
-            result = await provider.chat_completion(
-                messages,
-                model=model if provider == self.providers[0] else None,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                **kwargs
+            result = await asyncio.wait_for(
+                provider.chat_completion(
+                    messages,
+                    model=model if provider == self.providers[0] else None,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    **kwargs
+                ),
+                timeout=_PER_PROVIDER_TIMEOUT,
             )
             self._close_circuit(provider)
             return result
+        except asyncio.TimeoutError:
+            self._trip_circuit(provider)
+            logger.warning(f"Provider {provider.provider_name} timed out after {_PER_PROVIDER_TIMEOUT}s")
+            raise
         except Exception as e:
             self._trip_circuit(provider)
             logger.warning(f"Provider {provider.provider_name} failed: {e}")

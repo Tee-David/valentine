@@ -1,11 +1,30 @@
 # src/valentine/config.py
 from __future__ import annotations
 
+import os
 from pydantic_settings import BaseSettings
 from pydantic import Field
 
-
 class Settings(BaseSettings):
+    def _get_default_mcp_servers() -> dict:
+        servers = {}
+        if os.getenv("GITHUB_PERSONAL_ACCESS_TOKEN"):
+            servers["github"] = {
+                "command": "npx",
+                "args": ["-y", "@modelcontextprotocol/server-github"],
+                "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": os.getenv("GITHUB_PERSONAL_ACCESS_TOKEN")}
+            }
+        if os.getenv("BRAVE_API_KEY"):
+            servers["brave"] = {
+                "command": "npx",
+                "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+                "env": {"BRAVE_API_KEY": os.getenv("BRAVE_API_KEY")}
+            }
+        if os.getenv("GOOGLE_IMAP_PASSWORD"):
+            # A placeholder for future Google services that we'd want to load natively
+            pass
+        return servers
+
     # API Keys
     groq_api_key: str = Field(default="")
     cerebras_api_key: str = Field(default="")
@@ -33,11 +52,11 @@ class Settings(BaseSettings):
     sambanova_vision_model: str = "Llama-4-Maverick-17B-128E-Instruct"
 
     # Agent config
-    workspace_dir: str = Field(default="/opt/valentine/workspace")
-    skills_dir: str = Field(default="/opt/valentine/skills")
-    skills_builtin_dir: str = Field(default="/opt/valentine/scripts/skills-builtin")
+    workspace_dir: str = Field(default=os.getenv("VALENTINE_WORKSPACE_DIR", "/opt/valentine/workspace"))
+    skills_dir: str = Field(default=os.getenv("VALENTINE_SKILLS_DIR", ".agents/skills"))
+    skills_builtin_dir: str = Field(default=os.getenv("VALENTINE_BUILTIN_DIR", "scripts/skills-builtin"))
     max_shell_timeout: int = Field(default=30)
-    allowed_shell_dirs: list[str] = Field(default_factory=lambda: ["/opt/valentine/workspace"])
+    allowed_shell_dirs: list[str] = Field(default_factory=lambda: [os.getenv("VALENTINE_WORKSPACE_DIR", "/opt/valentine/workspace")])
 
     # Rate limits (requests per minute)
     groq_rpm: int = 30
@@ -56,8 +75,7 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO")
 
     # MCP Server Configuration
-    # Format: {"server_name": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": {"KEY": "val"}}}
-    mcp_servers: dict = Field(default_factory=dict)
+    mcp_servers: dict = Field(default_factory=_get_default_mcp_servers)
 
     # Autonomy Mode: "supervised" | "full" | "readonly"
     autonomy_mode: str = Field(default="supervised")

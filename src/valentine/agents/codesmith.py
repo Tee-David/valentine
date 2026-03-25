@@ -95,9 +95,30 @@ class CodeSmithAgent(BaseAgent):
                 skills.append(f"  - {name}: {desc}" if desc else f"  - {name}")
         return "\n".join(skills) if skills else "  (none installed)"
 
+    def _load_markdown_skills(self) -> str:
+        """Load instructions from autonomous Markdown skills (SKILL.md files)."""
+        md_skills = []
+        for d in (self.skills_dir, self.skills_builtin_dir):
+            if not os.path.isdir(d):
+                continue
+            for f in sorted(os.listdir(d)):
+                skill_dir = os.path.join(d, f)
+                if os.path.isdir(skill_dir):
+                    md_path = os.path.join(skill_dir, "SKILL.md")
+                    if os.path.isfile(md_path):
+                        try:
+                            with open(md_path, "r", encoding="utf-8") as fh:
+                                md_skills.append(f"--- AUTONOMOUS SKILL: {f} ---\n{fh.read().strip()}\n")
+                        except Exception as e:
+                            logger.error(f"Failed to read markdown skill {md_path}: {e}")
+        if not md_skills:
+            return ""
+        return "\n\nAUTONOMOUS AGENT SKILLS (Follow these instructions when the user invokes these topics):\n" + "\n".join(md_skills)
+
     @property
     def system_prompt(self) -> str:
         skills_list = self._discover_skills()
+        markdown_skills = self._load_markdown_skills()
 
         # Build MCP tools section if available
         mcp_section = ""
@@ -177,6 +198,13 @@ class CodeSmithAgent(BaseAgent):
             '  {"action": "skill_list"}\n'
             '  {"action": "mcp_tool", "name": "tool_name", "args": {"key": "value"}}\n'
             '  {"action": "rag_search", "query": "semantic search query"} — Search the indexed codebase for relevant code\n'
+            '  {"action": "index_codebase", "path": "/opt/valentine/workspace/my-project"} — Index a project directory for RAG search\n'
+            '  {"action": "rag_stats"} — Show RAG index statistics\n'
+            '  {"action": "sandbox_shell", "command": "npm install"} — Run command in isolated container\n'
+            '  {"action": "sandbox_code", "language": "python|node|shell", "code": "print(1)"} — Run unverified code safely\n'
+            '  {"action": "schedule_job", "name": "Daily News", "schedule": "daily 08:00", "task": "Search AI news"} — Schedule recurring task\n'
+            '  {"action": "list_jobs"} — View scheduled jobs\n'
+            '  {"action": "delete_job", "job_id": "12345"}\n'
             '  {"action": "generate_document", "format": "csv|json|excel|pdf|word|html|txt", "title": "filename", "content": "text content", "data": [["row1col1", "row1col2"], ["row2col1", "row2col2"]], "headers": ["col1", "col2"]} — Generate a document file\n'
             '  {"action": "preview", "path": "/path/to/project"} — Start a dev server + Cloudflare Tunnel and return a live HTTPS preview URL\n'
             '  {"action": "preview", "path": "/path/to/project", "command": "npm run dev", "port": 3000} — Preview with custom server command and port\n'
@@ -215,6 +243,8 @@ class CodeSmithAgent(BaseAgent):
         if not self._is_safe(command):
             return "⚠️ Blocked: That command is on the security denylist."
         try:
+            # Inherit full system PATH so npm/node/pip/etc. are discoverable
+            shell_env = {**os.environ, "HOME": os.path.expanduser("~")}
             result = subprocess.run(
                 command,
                 shell=True,
@@ -222,6 +252,7 @@ class CodeSmithAgent(BaseAgent):
                 capture_output=True,
                 text=True,
                 timeout=settings.max_shell_timeout,
+                env=shell_env,
             )
             out = result.stdout.strip()
             err = result.stderr.strip()
@@ -234,7 +265,7 @@ class CodeSmithAgent(BaseAgent):
             if err:
                 from valentine.core.evolution import SelfEvolver
                 import concurrent.futures
-                evolver = SelfEvolver(allow_apt=False)
+                evolver = SelfEvolver(allow_apt=os.environ.get("VALENTINE_ALLOW_APT", "") == "1")
                 suggestion = evolver.suggest_install(err)
                 if suggestion:
                     install_info = evolver.INSTALL_MAP.get(suggestion)
@@ -485,6 +516,15 @@ class CodeSmithAgent(BaseAgent):
                         results = await rag.search_formatted(query, limit=5)
                         output = results if results else "No relevant code found. The codebase may not be indexed yet."
                     execution_log.append(f"[rag_search] {output}")
+                elif act == "index_codebase":
+                    rag = _get_rag()
+                    path = action.get("path", self.workspace)
+                    count = await rag.index_directory(path)
+                    execution_log.append(f"[rag_index] Indexed {count} code chunks from {path}")
+                elif act == "rag_stats":
+                    rag = _get_rag()
+                    stats = await rag.get_stats()
+                    execution_log.append(f"[rag_stats] {stats}")
                 elif act == "generate_document":
                     from valentine.core.docgen import DocumentGenerator
                     gen = DocumentGenerator()
@@ -534,6 +574,43 @@ class CodeSmithAgent(BaseAgent):
                     proj_path = action.get("path")
                     result = await stop_preview(proj_path)
                     execution_log.append(f"[preview] {result}")
+                elif act == "sandbox_shell":
+                    from valentine.core.sandbox import DockerSandbox
+                    sandbox = DockerSandbox()
+                    cmd = action.get("command", "")
+                    res = await sandbox.run_shell([cmd])
+                    output = res.output if res.success else res.error
+                    execution_log.append(f"[sandbox] {cmd}\n{output}")
+                elif act == "sandbox_code":
+                    from valentine.core.sandbox import DockerSandbox
+                    sandbox = DockerSandbox()
+                    code = action.get("code", "")
+                    lang = action.get("language", "python")
+                    res = await sandbox.run_code(code, language=lang)
+                    output = res.output if res.success else res.error
+                    execution_log.append(f"[{lang} sandbox]\n{output}")
+                elif act == "schedule_job":
+                    from valentine.core.scheduler import Scheduler
+                    scheduler = Scheduler()
+                    name = action.get("name", "Task")
+                    schedule = action.get("schedule", "every 1h")
+                    task_instr = action.get("task", "")
+                    job = await scheduler.create_job(name, chat_id, msg.user_id, task_instr, schedule)
+                    execution_log.append(f"[schedule] Created job {job.job_id}: '{name}' ({schedule})")
+                elif act == "list_jobs":
+                    from valentine.core.scheduler import Scheduler
+                    scheduler = Scheduler()
+                    jobs = await scheduler.list_jobs(chat_id)
+                    lines = ["Scheduled Jobs:"]
+                    for j in jobs:
+                        lines.append(f"- {j.job_id}: {j.name} ({j.cron_expression})")
+                    execution_log.append("\n".join(lines) if jobs else "[schedule] No scheduled jobs found.")
+                elif act == "delete_job":
+                    from valentine.core.scheduler import Scheduler
+                    scheduler = Scheduler()
+                    job_id = action.get("job_id", "")
+                    success = await scheduler.delete_job(job_id)
+                    execution_log.append(f"[schedule] Deleted job {job_id}" if success else f"[schedule] Job {job_id} not found.")
                 elif act == "respond":
                     final_response = action.get("text", "")
 

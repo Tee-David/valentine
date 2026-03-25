@@ -145,13 +145,28 @@ No markdown. No explanation. JSON only."""
         if not self._memory or not message.text:
             return []
         try:
-            results = self._memory.search(message.text, user_id=message.user_id, limit=3)
+            # 1. Private User Facts
+            results_private = self._memory.search(message.text, user_id=message.user_id, limit=3)
+            # 2. Global Learning (Procedures, Capabilities, Constraints)
+            results_global = self._memory.search(message.text, user_id="global_system", limit=3)
+
+            # Combine and deduplicate
+            all_results = results_private + results_global
+            seen_texts = set()
+            unique_results = []
+            for r in all_results:
+                text = r.get("text", r.get("memory", ""))
+                if text and text not in seen_texts:
+                    seen_texts.add(text)
+                    unique_results.append(r)
+
+            # Take top 5 items overall
+            unique_results = unique_results[:5]
+
             context = []
-            for r in results:
+            for r in unique_results:
                 mem_type = r.get("metadata", {}).get("type", "fact")
                 text = r.get("text", r.get("memory", ""))
-                if not text:
-                    continue
                 if mem_type == "procedure":
                     context.append(f"[HOW-TO] {text}")
                 elif mem_type == "capability":

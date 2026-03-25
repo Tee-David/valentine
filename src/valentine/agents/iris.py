@@ -5,7 +5,10 @@ import base64
 import json
 import logging
 import os
+import tempfile
 import urllib.parse
+
+import httpx
 
 from valentine.agents.base import BaseAgent
 from valentine.identity import identity_block
@@ -79,6 +82,29 @@ class IrisAgent(BaseAgent):
         encoded_prompt = urllib.parse.quote(prompt)
         return f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true"
 
+    async def _download_image(self, url: str) -> str | None:
+        """Download an image from URL to a local temp file.
+
+        Pollinations generates images on-demand so the first request is slow.
+        By downloading locally we avoid Telegram's send_photo timeout.
+        Returns the local file path, or None on failure.
+        """
+        try:
+            async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+                resp = await client.get(url)
+                resp.raise_for_status()
+                # Determine extension from content-type
+                ct = resp.headers.get("content-type", "image/png")
+                ext = ".png" if "png" in ct else ".jpg"
+                fd, path = tempfile.mkstemp(suffix=ext, prefix="valentine_img_")
+                with os.fdopen(fd, "wb") as f:
+                    f.write(resp.content)
+                logger.info(f"Downloaded image to {path} ({len(resp.content)} bytes)")
+                return path
+        except Exception as e:
+            logger.error(f"Failed to download image from {url}: {e}")
+            return None
+
     async def process_task(self, task: AgentTask) -> TaskResult:
         intent = task.routing.intent
         msg = task.message
@@ -127,6 +153,23 @@ class IrisAgent(BaseAgent):
 
                 image_url = self._generate_image_url(gen_prompt or "beautiful abstract art")
 
+                # Download the image locally — pollinations generates on-demand
+                # which is too slow for Telegram's URL-based send_photo
+                local_path = await self._download_image(image_url)
+                if not local_path:
+                    # Fallback: return URL and let Telegram try directly
+                    response_msg = f"Here you go! I generated this based on: \"{target_prompt}\""
+                    if chat_id:
+                        await self.bus.append_history(chat_id, "assistant", response_msg)
+                    return TaskResult(
+                        task_id=task.task_id,
+                        agent=self.name,
+                        success=True,
+                        content_type=ContentType.PHOTO,
+                        text=response_msg,
+                        media_path=image_url,
+                    )
+
                 response_msg = f"Here you go! I generated this based on: \"{target_prompt}\""
                 if chat_id:
                     await self.bus.append_history(chat_id, "assistant", response_msg)
@@ -137,7 +180,7 @@ class IrisAgent(BaseAgent):
                     success=True,
                     content_type=ContentType.PHOTO,
                     text=response_msg,
-                    media_path=image_url,
+                    media_path=local_path,
                 )
 
             # --- Image Analysis (Vision) ---

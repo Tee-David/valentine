@@ -117,14 +117,37 @@ class OracleAgent(BaseAgent):
             logger.error(f"URL fetch failed: {e}")
             return f"[Could not fetch URL: {e}]"
 
-    _RECENT_SIGNALS = {"latest", "news", "current", "today", "recent", "now", "this week", "this month", "2026", "2025"}
-    _SEARCH_SIGNALS = {"search", "look up", "find out", "google", "what happened", "update", "who won", "score"}
+    _RECENT_SIGNALS = {
+        "latest", "news", "current", "today", "recent", "now",
+        "this week", "this month", "2026", "2025", "right now",
+        "happening", "breaking", "trending", "live",
+    }
+    _SEARCH_SIGNALS = {
+        "search", "look up", "find out", "google", "what happened",
+        "update", "who won", "score", "results",
+        "what is the", "what's the", "how is", "how much",
+        "tell me about", "explain", "when is", "where is",
+        "who is", "who was", "what are", "how do", "how does",
+        "price of", "weather in", "weather for",
+        "define", "meaning of", "history of",
+        "compare", "difference between", "vs ",
+        "how to", "tutorial", "guide",
+    }
 
     def _needs_search(self, text: str, intent: str) -> bool:
         """Determine if the query needs a web search."""
         lower = text.lower()
         all_signals = self._RECENT_SIGNALS | self._SEARCH_SIGNALS | {"2024"}
-        return intent in ("research", "search") or any(s in lower for s in all_signals)
+        # Always search if ZeroClaw explicitly routed as research/search
+        if intent in ("research", "search"):
+            return True
+        # Check for keyword signals
+        if any(s in lower for s in all_signals):
+            return True
+        # Questions with "?" that aren't simple greetings often benefit from search
+        if "?" in text and len(text) > 20:
+            return True
+        return False
 
     def _wants_recent(self, text: str) -> bool:
         """Check if the query specifically wants recent/current information."""

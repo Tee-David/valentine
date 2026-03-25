@@ -2,9 +2,9 @@
 
 > Built by **WDC Solutions** | CEO: **Taiwo David Dayomola**
 
-Valentine is an autonomous, self-aware AI assistant that operates through Telegram. It runs a multi-agent architecture where 8 specialized agents — each an independent OS process — collaborate over Redis Streams to handle everything from casual conversation to code engineering, web browsing, voice processing, and document generation.
+Valentine is an autonomous, self-aware AI assistant that operates through Telegram. It runs a multi-agent architecture where 8 specialized agents — each an independent OS process — collaborate over Redis Streams to handle everything from casual conversation to code engineering, web browsing, voice processing, document generation, and proactive daily scheduling.
 
-All LLM inference runs on **free-tier APIs** (Groq, Cerebras, SambaNova). Designed to run on an **Oracle Cloud Free Tier ARM64 VM** (1 OCPU, 6GB RAM).
+All LLM inference runs on **free-tier APIs** (Groq, Cerebras, SambaNova). Designed to run on an **Oracle Cloud Free Tier ARM64 VM** (1 OCPU, 6GB RAM). Inspired by **OpenClaw**, Valentine aims to be an equally versatile personal assistant with privacy-safe cross-user learning.
 
 ---
 
@@ -63,10 +63,18 @@ Automatic **fallback chains**: if one provider is rate-limited, requests route t
 - **Natural Language** — Deep conversation, reasoning, research, summarisation, games, creative writing
 - **Web Search** — Real-time search via DuckDuckGo + URL content fetching
 - **Code Engineering** — Write, debug, explain code in any language; shell execution on the host
-- **Vision** — Analyse photos (OCR, scene description, screenshot-to-code), generate images via Pollinations AI *(requires SambaNova API key for vision)*
-- **Voice** — Transcribe voice notes, respond with text-to-speech audio files *(requires ffmpeg installed)*
-- **Web Browsing** — Headless Chromium: navigate pages, scrape data, take screenshots, fill forms *(requires Playwright installed)*
-- **Persistent Memory** — Remembers user preferences and context across conversations *(requires Qdrant running; gracefully degrades if unavailable)*
+- **Vision** — Analyse photos (OCR, scene description, screenshot-to-code), generate images via Pollinations AI
+- **Voice** — Transcribe voice notes, respond with text-to-speech audio files
+- **Web Browsing** — Headless Chromium: navigate pages, scrape data, take screenshots, fill forms
+- **Persistent Memory** — Remembers user preferences and context across conversations
+
+### Privacy-Safe Cross-User Learning
+- **Dual-Layer Memory** — Private facts stay isolated per-user. Procedural knowledge (HOW-TOs, environment fixes, capability discoveries) is PII-scrubbed by the LLM and stored in a global namespace. ZeroClaw merges both layers to enrich routing decisions without exposing sensitive data.
+- **Self-Learning Skills** — Valentine can autonomously research new technologies using its `self-learning` skill and write reusable `SKILL.md` instruction files into `.agents/skills/`.
+
+### Conversation Management
+- **Telegram Sessions** — Multiple conversation threads per user, like ChatGPT. Use `/new [name]` to start a project context, `/conversations` to list, `/resume <id>` to switch.
+- **Interactive Tour** — `/tour` opens a segmented, button-driven onboarding walkthrough using Telegram Inline Keyboards.
 
 ### Tools & Integrations
 - **Weather** — Real-time weather data via Open-Meteo (no API key needed)
@@ -74,13 +82,16 @@ Automatic **fallback chains**: if one provider is rate-limited, requests route t
 - **Document Generation** — Create Excel, PDF, Word, CSV, HTML, JSON, plain text files and send via Telegram
 - **Self-Evolution** — Auto-detect and install missing pip packages when shell commands fail
 - **Environment Awareness** — Audit the host system (CPU, RAM, disk, network, installed runtimes)
-- **Codebase RAG** — Semantic code search over project files *(requires sentence-transformers installed)*
+- **Codebase RAG** — Semantic code search over project files. Index any directory with `index_codebase`, then query with `rag_search`.
 
-### Frameworks (Present but not fully battle-tested)
-- **MCP Tool Integration** — Connect to MCP servers (GitHub, filesystem, databases); framework is wired but lightly used in production
-- **Dynamic Skills** — Install and run skills from shell scripts or Git repos at runtime; framework exists, limited built-in skills
-- **Autonomy Modes** — Supervised/Full/Read-only modes; approval gates implemented but not extensively tested
-- **Proactive Scheduling** — Cron-like recurring tasks; scheduler exists but limited real-world usage
+### OpenClaw-Grade Connectivity (MCP)
+- **GitHub** — Full repository management via `@modelcontextprotocol/server-github` (auto-configured when `GITHUB_PERSONAL_ACCESS_TOKEN` is set)
+- **Brave Search** — Real-time web search via `@modelcontextprotocol/server-brave-search` (auto-configured when `BRAVE_API_KEY` is set)
+- **Extensible** — Any MCP server can be added by dropping its config into the `MCP_SERVERS` env var or setting the appropriate API key
+
+### Isolation & Scheduling
+- **Docker Sandbox** — CodeSmith can run untrusted code in isolated Docker containers with hard memory (256MB) and CPU (0.5) limits. Containers auto-destroy after execution.
+- **Proactive Scheduling** — Redis-backed cron scheduler. Tell Valentine to "send me AI news every morning at 8 AM" and it creates a persistent job that fires autonomously.
 
 ### Security & Integrity
 - **Prompt Injection Resistance** — Agents hardened against "ignore previous instructions" and similar attacks
@@ -95,6 +106,7 @@ Automatic **fallback chains**: if one provider is rate-limited, requests route t
 | Command | Description |
 |---------|-------------|
 | `/start` | Introduction and getting started |
+| `/tour` | Interactive capabilities walkthrough (segmented, button-driven) |
 | `/help` | List all available commands |
 | `/whoami` | Valentine's identity and origins |
 | `/capabilities` | Full list of everything Valentine can do |
@@ -103,11 +115,15 @@ Automatic **fallback chains**: if one provider is rate-limited, requests route t
 | `/mode` | Show or change autonomy mode (supervised/full/readonly) |
 | `/skills` | List installed skills |
 | `/tools` | List available MCP tools |
+| `/new [name]` | Start a new conversation session (project context isolation) |
+| `/conversations` | List all active sessions |
+| `/resume <id>` | Switch to a previous session |
 | `/schedule` | Create a recurring scheduled task |
 | `/jobs` | List active scheduled jobs |
 | `/memory` | Search Valentine's long-term memory |
 | `/forget` | Remove a specific memory |
 | `/clear` | Clear conversation history (keeps long-term memory) |
+| `/tts` | Get a voice reply |
 | `/restart` | Pull latest code and restart (admin only) |
 
 ---
@@ -239,10 +255,14 @@ CEREBRAS_API_KEY=your_cerebras_key
 SAMBANOVA_API_KEY=your_sambanova_key
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
 
-# Optional
+# Optional — MCP Integrations (auto-configured when set)
+GITHUB_PERSONAL_ACCESS_TOKEN=ghp_your_token
+BRAVE_API_KEY=your_brave_key
+
+# Optional — System
 REDIS_URL=redis://localhost:6379/0
 AUTONOMY_MODE=supervised
-GITHUB_TOKEN=your_github_pat
+ADMIN_USER_ID=your_telegram_user_id
 ```
 
 Get your keys (all free):
@@ -360,10 +380,14 @@ mypy src/valentine/
 
 ## MCP Server Configuration
 
-Valentine can connect to external MCP servers for extended tool access. Configure in `.env`:
+Valentine **auto-discovers** MCP servers based on environment variables:
+- Set `GITHUB_PERSONAL_ACCESS_TOKEN` → GitHub MCP activates automatically
+- Set `BRAVE_API_KEY` → Brave Search MCP activates automatically
+
+You can also manually configure additional servers via the `MCP_SERVERS` env var:
 
 ```env
-MCP_SERVERS={"github": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_..."}}}
+MCP_SERVERS={"custom": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-sqlite"], "env": {"DB_PATH": "/data/my.db"}}}
 ```
 
 See [configs/mcp-servers.example.json](configs/mcp-servers.example.json) for examples including GitHub, filesystem, SQLite, Brave Search, Google Drive, and Slack.

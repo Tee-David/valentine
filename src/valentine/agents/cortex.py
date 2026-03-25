@@ -86,15 +86,16 @@ When extracting memories, categorize them:
                 metadata={"type": "fact", "source_msg": msg.message_id}
             )
 
-        # Extract procedural memories from agent responses
+        # Extract cross-user procedural memories (Learning Layer)
         if agent_response:
             proc_prompt = (
-                f"Extract any HOW-TO knowledge, successful commands, workflows, "
-                f"error resolutions, or environment constraints from this interaction.\n\n"
+                f"Extract actionable HOW-TO knowledge, successful workflows, error resolutions, "
+                f"or environment constraints from this interaction.\n\n"
                 f"User said: {msg.text}\n"
                 f"Agent responded: {agent_response[:1000]}\n\n"
-                f"Format: One procedure per line. Only extract if there's actionable knowledge. "
-                f"If nothing procedural, respond with 'nothing'."
+                f"CRITICAL PRIVACY RULES: You MUST generalize and redact the knowledge. "
+                f"Remove ALL names, IDs, IP addresses, private file paths, passwords, and sensitive data. "
+                f"Format: One clean, general procedure per line. If nothing procedural, respond with 'nothing'."
             )
             proc_messages = [
                 {"role": "system", "content": self.system_prompt},
@@ -104,7 +105,7 @@ When extracting memories, categorize them:
             if proc_extraction and len(proc_extraction) > 5 and "nothing" not in proc_extraction.lower():
                 self.memory.add(
                     proc_extraction,
-                    user_id=msg.user_id,
+                    user_id="global_system",  # Stored globally for cross-user learning
                     metadata={"type": "procedure", "source_msg": msg.message_id}
                 )
 
@@ -113,7 +114,7 @@ When extracting memories, categorize them:
         if self.memory:
             self.memory.add(
                 f"[CAPABILITY] {capability}",
-                user_id=user_id,
+                user_id="global_system",
                 metadata={"type": "capability"}
             )
 
@@ -122,7 +123,7 @@ When extracting memories, categorize them:
         if self.memory:
             self.memory.add(
                 f"[CONSTRAINT] {constraint}",
-                user_id=user_id,
+                user_id="global_system",
                 metadata={"type": "constraint"}
             )
 
@@ -131,7 +132,7 @@ When extracting memories, categorize them:
         if self.memory:
             self.memory.add(
                 f"[ENVIRONMENT] {env_snapshot}",
-                user_id=user_id,
+                user_id="global_system",
                 metadata={"type": "environment"}
             )
 
@@ -177,9 +178,9 @@ When extracting memories, categorize them:
                 return TaskResult(task_id=task.task_id, agent=self.name, success=True, text=context)
 
             elif intent == "search_procedures":
-                # Search specifically for procedural knowledge
+                # Search specifically for procedural knowledge (which is stored globally)
                 query = f"how to {msg.text}" if not msg.text.lower().startswith("how") else msg.text
-                results = self.memory.search(query, user_id=msg.user_id, limit=5)
+                results = self.memory.search(query, user_id="global_system", limit=5)
                 # Filter for procedural entries
                 procedures = [r["text"] for r in results if r.get("metadata", {}).get("type") in ("procedure", "capability")]
                 if not procedures:

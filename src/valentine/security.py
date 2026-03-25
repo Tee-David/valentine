@@ -112,15 +112,36 @@ def sanitise_output(text: str) -> str:
             "medium.com",
             "youtube.com",
             "reddit.com",
+            "pollinations.ai",
+            "open-meteo.com",
+            "coingecko.com",
+            "google.com",
+            "twitter.com",
+            "x.com",
+            "linkedin.com",
+            "npmjs.com",
+            "pypi.org",
+            "docs.python.org",
+            "developer.mozilla.org",
+            "w3schools.com",
+            "localhost",
+            "127.0.0.1",
         )
         if any(domain in url for domain in _SAFE_DOMAINS):
             return url
-        # Also preserve any URL the LLM is citing as a source (has a recognizable TLD)
-        if re.search(r"https?://[a-z0-9][-a-z0-9]*\.(com|org|net|io|co|dev|ai|edu|gov)", url):
+        # Preserve any URL with a recognizable public TLD (broad coverage)
+        if re.search(
+            r"https?://[a-z0-9][-a-z0-9]*\."
+            r"(com|org|net|io|co|dev|ai|edu|gov|app|me|info|xyz|tech|cc|us|uk|ng|za)",
+            url,
+        ):
             return url
-        return "[redacted-url]"
+        # Silently remove internal/API URLs — never show [redacted-url] to user
+        return ""
 
     text = re.sub(r"https?://[^\s,)]+", _redact_url, text)
+    # Clean up leftover whitespace from removed URLs
+    text = re.sub(r"  +", " ", text).strip()
 
     # Strip Python tracebacks
     if "Traceback (most recent call last)" in text:
