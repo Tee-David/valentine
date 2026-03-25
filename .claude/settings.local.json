@@ -1,7 +1,21 @@
 {
   "permissions": {
     "allow": [
-      "Bash(ssh -i /home/teedavid/Desktop/Projects/valentine/valentines-private.key ubuntu@130.61.111.153 \"pkill -f ''valentine.main'' 2>/dev/null; sleep 1; cd /opt/valentine && git pull && nohup venv/bin/python -m valentine.main > /tmp/valentine/valentine.log 2>&1 & echo $!\")"
+      "Bash(ssh -i /home/teedavid/Desktop/Projects/valentine/valentines-private.key ubuntu@130.61.111.153 \"pkill -f ''valentine.main'' 2>/dev/null; sleep 1; cd /opt/valentine && git pull && nohup venv/bin/python -m valentine.main > /tmp/valentine/valentine.log 2>&1 & echo $!\")",
+      "Bash(chmod +x /home/teedavid/Desktop/Projects/valentine/scripts/skills.sh)",
+      "Bash(GIT_SSH_COMMAND=\"ssh -i /home/teedavid/Desktop/Projects/valentine/valentine-new.key -o StrictHostKeyChecking=no\" git push origin main)",
+      "Bash(ssh -i /home/teedavid/Desktop/Projects/valentine/valentine-new.key -o StrictHostKeyChecking=no -v ubuntu@130.61.111.153 \"echo connected\")",
+      "Bash(ssh -i /home/teedavid/Desktop/Projects/valentine/valentines-private.key -o StrictHostKeyChecking=no ubuntu@130.61.111.153 \"cd /opt/valentine && git pull origin main 2>&1\")",
+      "Bash(ssh -i /home/teedavid/Desktop/Projects/valentine/valentines-private.key -o StrictHostKeyChecking=no ubuntu@130.61.111.153 \"kill -9 57548; pkill -9 -f telegram_bridge; echo killed\")",
+      "Bash(git mv:*)",
+      "Bash(python3 -c \":*)",
+      "Bash(git -C /home/teedavid/Desktop/Projects/valentine diff --stat)",
+      "Bash(git -C /home/teedavid/Desktop/Projects/valentine log --oneline -5)",
+      "Bash(git -C /home/teedavid/Desktop/Projects/valentine ls-files -- '*.key' 'valentines-private.key')",
+      "Bash(git add:*)",
+      "Bash(python -m pytest tests/ -v)",
+      "WebSearch",
+      "Bash(ssh -i /home/teedavid/Desktop/Projects/valentine/valentines-private.key -o StrictHostKeyChecking=no ubuntu@130.61.111.153 \"sudo journalctl -u valentine --since ''2 min ago'' --no-pager | grep -i -E ''search|oracle|ddgs|duckduck|error'' | tail -30\")"
     ]
   }
 }

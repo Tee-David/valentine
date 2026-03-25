@@ -109,6 +109,9 @@ class TelegramAdapter(PlatformAdapter):
         self.app.add_handler(CommandHandler("restart", self._cmd_restart))
         # Message handlers (must be last)
         self.app.add_handler(
+            MessageHandler(filters.StatusUpdate.WEB_APP_DATA, self._on_web_app_data)
+        )
+        self.app.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_text)
         )
         self.app.add_handler(MessageHandler(filters.PHOTO, self._on_photo))
@@ -989,6 +992,28 @@ class TelegramAdapter(PlatformAdapter):
         caption = update.message.caption or ""
         await self._route(update, ContentType.VIDEO, caption, media_path=path)
 
+    async def _on_web_app_data(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Handle data sent back from the Telegram Mini App via sendData().
+
+        The Mini App sends a JSON string containing an action and optional payload.
+        We parse it and route it through ZeroClaw as a text message so agents
+        get full context from the Mini App interaction.
+        """
+        data_str = update.effective_message.web_app_data.data
+        logger.info(f"Received web_app_data from Mini App: {data_str[:200]}")
+
+        try:
+            payload = json.loads(data_str)
+        except json.JSONDecodeError:
+            payload = {"raw": data_str}
+
+        # Construct a human-readable text for ZeroClaw routing
+        action = payload.get("action", "unknown")
+        detail = payload.get("detail", payload.get("text", json.dumps(payload)))
+        text = f"[MiniApp action={action}] {detail}"
+
+        await self._route(update, ContentType.TEXT, text)
+
     # ------------------------------------------------------------------
     # Outbound: Redis → Telegram
     # ------------------------------------------------------------------
@@ -1093,15 +1118,48 @@ class TelegramAdapter(PlatformAdapter):
                 text = (result.text or "").strip()
                 if not text:
                     return
+
+                # Build optional Mini App inline button if agent attached one
+                reply_markup = self._build_miniapp_markup(result.miniapp)
+
                 # Telegram has a 4096-char limit per message
-                for chunk in _chunk_text(text, 4096):
+                chunks = list(_chunk_text(text, 4096))
+                for i, chunk in enumerate(chunks):
+                    # Attach the miniapp button only to the last chunk
+                    kwargs: dict = {"chat_id": result.chat_id, "text": chunk}
+                    if reply_markup and i == len(chunks) - 1:
+                        kwargs["reply_markup"] = reply_markup
                     await self._send_with_retry(
-                        self.app.bot.send_message,
-                        chat_id=result.chat_id,
-                        text=chunk,
+                        self.app.bot.send_message, **kwargs
                     )
         except Exception as e:
             logger.error(f"Failed to send result {result.task_id} to Telegram: {e}")
+
+    def _build_miniapp_markup(self, miniapp: dict | None):
+        """Build an InlineKeyboardMarkup with a WebAppInfo button if miniapp data is present.
+
+        Expected miniapp dict format:
+            {"route": "/dashboard", "label": "Open Dashboard"}
+        Returns None if miniapp is None or invalid.
+        """
+        if not miniapp or not isinstance(miniapp, dict):
+            return None
+        route = miniapp.get("route", "/")
+        label = miniapp.get("label", "🚀 Open App")
+        try:
+            from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+            import os
+            base_url = os.environ.get(
+                "VALENTINE_WORKBENCH_URL", "https://valentine-workbench.vercel.app"
+            )
+            # Append route to base URL (strip trailing slash from base, leading from route)
+            url = base_url.rstrip("/") + "/" + route.lstrip("/")
+            return InlineKeyboardMarkup([
+                [InlineKeyboardButton(text=label, web_app=WebAppInfo(url=url))]
+            ])
+        except Exception as e:
+            logger.warning(f"Failed to build miniapp markup: {e}")
+            return None
 
     # ------------------------------------------------------------------
     # Media download

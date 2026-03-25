@@ -341,9 +341,10 @@ class Scheduler:
         for data in raw.values():
             reminder = Reminder.from_dict(json.loads(data))
             if now >= reminder.fire_at:
+                # Delete FIRST to prevent the next loop iteration from re-firing
+                await self._redis.hdel(REMINDERS_KEY, reminder.reminder_id)
                 logger.info(f"Firing reminder: {reminder.message[:50]}")
                 await self._fire_reminder(reminder)
-                await self._redis.hdel(REMINDERS_KEY, reminder.reminder_id)
 
     async def _fire_reminder(self, reminder: Reminder):
         """Send a reminder notification directly to the user's chat."""

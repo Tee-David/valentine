@@ -82,3 +82,70 @@ async def project_events(request: Request, project_id: str):
     """SSE endpoint for project events (like 'reload')."""
     return EventSourceResponse(event_generator(request, project_id))
 
+
+@app.get("/api/projects")
+async def list_projects():
+    """List all projects that currently have an active Cloudflare tunnel."""
+    if not bus:
+        return {"projects": []}
+
+    # Scan Redis for all preview URL keys
+    projects = []
+    async for key in bus.redis.scan_iter("valentine:workbench:preview_url:*"):
+        project_id = key.decode("utf-8").split(":")[-1]
+        url = await bus.redis.get(key)
+        projects.append({
+            "id": project_id,
+            "url": url.decode("utf-8") if url else None,
+            "status": "live" if url else "offline",
+        })
+    return {"projects": projects}
+
+
+@app.post("/api/action")
+async def receive_miniapp_action(request: Request):
+    """REST bridge for Mini App → Valentine agent communication.
+
+    The React frontend uses this when opened via InlineKeyboard (where sendData
+    is not available). The payload is published to Redis so ZeroClaw can route it.
+
+    Expected body: {"chat_id": "...", "user_id": "...", "action": "...", "detail": "..."}
+    """
+    if not bus:
+        return {"ok": False, "error": "Bus not initialized"}
+
+    body = await request.json()
+    chat_id = body.get("chat_id")
+    user_id = body.get("user_id", "miniapp")
+    action = body.get("action", "unknown")
+    detail = body.get("detail", "")
+
+    if not chat_id:
+        return {"ok": False, "error": "chat_id is required"}
+
+    # Publish as a synthetic incoming message on the router stream
+    import uuid
+    from datetime import datetime, timezone
+
+    synthetic_msg = {
+        "message_id": f"miniapp-{uuid.uuid4().hex[:8]}",
+        "chat_id": chat_id,
+        "user_id": user_id,
+        "platform": "miniapp",
+        "content_type": "text",
+        "text": f"[MiniApp action={action}] {detail}",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+    task_data = {
+        "task_id": str(uuid.uuid4()),
+        "agent": "zeroclaw",
+        "routing": {"intent": "incoming", "agent": "zeroclaw", "priority": "normal"},
+        "message": synthetic_msg,
+        "previous_results": [],
+    }
+
+    await bus.add_task(bus.ROUTER_STREAM, task_data)
+    logger.info(f"MiniApp action bridged to ZeroClaw: {action} for chat {chat_id}")
+
+    return {"ok": True, "task_id": task_data["task_id"]}

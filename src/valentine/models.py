@@ -155,6 +155,7 @@ class TaskResult:
     error: str | None = None
     chat_id: str | None = None
     processing_time_ms: int = 0
+    miniapp: dict | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -168,6 +169,7 @@ class TaskResult:
             "error": self.error,
             "chat_id": self.chat_id,
             "processing_time_ms": self.processing_time_ms,
+            "miniapp": self.miniapp,
         }
 
     @classmethod
@@ -183,4 +185,5 @@ class TaskResult:
             error=data.get("error"),
             chat_id=data.get("chat_id"),
             processing_time_ms=data.get("processing_time_ms", 0),
+            miniapp=data.get("miniapp"),
         )

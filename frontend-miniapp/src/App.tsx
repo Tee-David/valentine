@@ -164,6 +164,11 @@ function App() {
           </div>
         )}
       </main>
+
+      {/* Footer Attribution */}
+      <footer className="flex-none bg-tg-secondaryBg border-t border-tg-hint/20 px-4 py-1.5 flex justify-center items-center z-10 text-[10px] text-tg-hint uppercase tracking-wider font-semibold shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
+        Powered by WDC Solutions
+      </footer>
     </div>
   );
 }
