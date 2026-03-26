@@ -31,6 +31,22 @@ class Settings(BaseSettings):
                 "args": ["-y", "@modelcontextprotocol/server-searxng"],
                 "env": {"SEARXNG_URL": searxng_url},
             }
+        # Vercel — deploy and manage Vercel projects
+        vercel_token = os.getenv("VERCEL_TOKEN")
+        if vercel_token:
+            servers["vercel"] = {
+                "command": "npx",
+                "args": ["-y", "vercel-mcp-server"],
+                "env": {"VERCEL_TOKEN": vercel_token},
+            }
+        # Render — deploy and manage Render.com services
+        render_key = os.getenv("RENDER_API_KEY")
+        if render_key:
+            servers["render"] = {
+                "command": "npx",
+                "args": ["-y", "@render-oss/render-mcp-server"],
+                "env": {"RENDER_API_KEY": render_key},
+            }
         return servers
 
     # API Keys
