@@ -36,7 +36,7 @@ class TelegramBot:
         ]
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         await update.message.reply_text(
-            "Hey! I'm Valentine — your AI assistant. How can I help you today?",
+            "Hey! I'm Valentine — your AI agent and personal assistant. How can I help you today?",
             reply_markup=reply_markup
         )
 

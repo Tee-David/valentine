@@ -204,3 +204,85 @@ async def receive_miniapp_action(request: Request):
     logger.info(f"MiniApp action bridged to ZeroClaw: {action} for chat {chat_id}")
 
     return {"ok": True, "task_id": task_data["task_id"]}
+
+
+# ------------------------------------------------------------------
+# Session Management (ChatGPT-style conversation threads)
+# ------------------------------------------------------------------
+
+_session_mgr = None
+
+def _get_session_mgr():
+    """Lazy-init the session manager with Redis."""
+    global _session_mgr
+    if _session_mgr is None:
+        from valentine.core.session_manager import SessionManager
+        redis_client = bus.redis if bus else None
+        _session_mgr = SessionManager(redis_client=redis_client)
+    return _session_mgr
+
+
+@app.get("/api/sessions")
+async def list_sessions(chat_id: str = None, user_id: str = None):
+    """List all conversation sessions (like ChatGPT's sidebar)."""
+    mgr = _get_session_mgr()
+    sessions = await mgr.list_sessions(chat_id=chat_id, user_id=user_id)
+    return {
+        "sessions": [
+            {
+                "session_id": s.session_id,
+                "title": s.title,
+                "chat_id": s.chat_id,
+                "project_path": s.project_path,
+                "last_active": s.last_active,
+                "message_count": len(s.messages),
+                "has_summary": bool(s.summary),
+            }
+            for s in sessions
+        ]
+    }
+
+
+@app.post("/api/sessions/new")
+async def create_session(request: Request):
+    """Create a new conversation session (like 'New Chat' button)."""
+    body = await request.json()
+    mgr = _get_session_mgr()
+    session = await mgr.new_session(
+        chat_id=body.get("chat_id", "default"),
+        user_id=body.get("user_id", "user"),
+        title=body.get("title", "New Conversation"),
+        project_path=body.get("project_path"),
+    )
+    return {"ok": True, "session": session.to_dict()}
+
+
+@app.post("/api/sessions/{session_id}/switch")
+async def switch_session(session_id: str, request: Request):
+    """Switch the active session for a chat."""
+    body = await request.json()
+    mgr = _get_session_mgr()
+    session = await mgr.switch_session(
+        chat_id=body.get("chat_id", "default"),
+        session_id=session_id,
+    )
+    if session:
+        return {"ok": True, "session": session.to_dict()}
+    return {"ok": False, "error": "Session not found"}
+
+
+@app.get("/api/sessions/{session_id}/history")
+async def get_session_history(session_id: str):
+    """Get conversation history for a specific session."""
+    mgr = _get_session_mgr()
+    session = await mgr._load_session(session_id)
+    if not session:
+        return {"ok": False, "error": "Session not found"}
+    return {
+        "ok": True,
+        "title": session.title,
+        "summary": session.summary,
+        "messages": session.messages[-50:],  # Last 50 messages
+        "total_messages": len(session.messages),
+    }
+
