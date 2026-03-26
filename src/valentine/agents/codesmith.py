@@ -221,6 +221,7 @@ class CodeSmithAgent(BaseAgent):
             '  {"action": "preview", "path": "/path/to/project"} — Start a dev server + Cloudflare Tunnel and return a live HTTPS preview URL\n'
             '  {"action": "preview", "path": "/path/to/project", "command": "npm run dev", "port": 3000} — Preview with custom server command and port\n'
             '  {"action": "stop_preview", "path": "/path/to/project"} — Stop a running preview (omit path to stop all)\n'
+            '  {"action": "voice_note", "text": "The message to speak"} — Send a distinct voice note to the user. Use this whenever the user asks for a voice note!\n'
             '  {"action": "respond", "text": "Your conversational response to the user"}\n\n'
             "RULES:\n"
             "- ALWAYS include a 'respond' action as the LAST action with a natural, "
@@ -641,6 +642,24 @@ class CodeSmithAgent(BaseAgent):
                     job_id = action.get("job_id", "")
                     success = await scheduler.delete_job(job_id)
                     execution_log.append(f"[schedule] Deleted job {job_id}" if success else f"[schedule] Job {job_id} not found.")
+                elif act == "voice_note":
+                    text = action.get("text", "")
+                    try:
+                        import uuid, os, asyncio
+                        from valentine.config import settings
+                        from valentine.models import ContentType
+                        out_path = os.path.join(settings.workspace_dir, f"voice_{uuid.uuid4().hex[:8]}.mp3")
+                        cmd = ["edge-tts", "--text", text, "--write-media", out_path]
+                        proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                        await proc.communicate()
+                        if proc.returncode == 0 and os.path.exists(out_path):
+                            final_media_path = out_path
+                            content_type = ContentType.VOICE
+                            execution_log.append(f"[voice] Generated MP3 voice note")
+                        else:
+                            execution_log.append(f"[voice] Failed to generate TTS")
+                    except Exception as e:
+                        execution_log.append(f"[voice] Error: {e}")
                 elif act == "respond":
                     final_response = action.get("text", "")
 
@@ -676,11 +695,16 @@ class CodeSmithAgent(BaseAgent):
             if chat_id:
                 await self.bus.append_history(chat_id, "assistant", out_txt[:500])
 
+            kwargs = {}
+            if content_type:
+                kwargs["content_type"] = content_type
+
             return TaskResult(
                 task_id=task.task_id, agent=self.name,
                 success=True, text=out_txt[:4000],
                 media_path=final_media_path,
                 file_name=final_file_name,
+                **kwargs
             )
 
         except Exception as e:
