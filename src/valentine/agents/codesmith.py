@@ -215,9 +215,10 @@ class CodeSmithAgent(BaseAgent):
             '  {"action": "sandbox_shell", "command": "npm install"} — Run command in isolated container\n'
             '  {"action": "sandbox_code", "language": "python|node|shell", "code": "print(1)"} — Run unverified code safely\n'
             '  {"action": "schedule_job", "name": "Daily News", "schedule": "daily 08:00", "task": "Search AI news"} — Schedule recurring task\n'
+            '  {"action": "create_reminder", "message": "Check oven", "delay_seconds": 300} — Schedule a one-time reminder\n'
             '  {"action": "list_jobs"} — View scheduled jobs\n'
             '  {"action": "delete_job", "job_id": "12345"}\n'
-            '  {"action": "generate_document", "format": "csv|json|excel|pdf|word|html|txt", "title": "filename", "content": "text content", "data": [["row1col1", "row1col2"], ["row2col1", "row2col2"]], "headers": ["col1", "col2"]} — Generate a document file\n'
+            '  {"action": "generate_document", "format": "csv|json|excel|pdf|word|html|txt", "title": "filename", "content": "text content", "data": [["row1col1", "row1col2"]], "headers": ["col1", "col2"]} — Generate a document file\n'
             '  {"action": "preview", "path": "/path/to/project"} — Start a dev server + Cloudflare Tunnel and return a live HTTPS preview URL\n'
             '  {"action": "preview", "path": "/path/to/project", "command": "npm run dev", "port": 3000} — Preview with custom server command and port\n'
             '  {"action": "stop_preview", "path": "/path/to/project"} — Stop a running preview (omit path to stop all)\n'
@@ -642,6 +643,13 @@ class CodeSmithAgent(BaseAgent):
                     job_id = action.get("job_id", "")
                     success = await scheduler.delete_job(job_id)
                     execution_log.append(f"[schedule] Deleted job {job_id}" if success else f"[schedule] Job {job_id} not found.")
+                elif act == "create_reminder":
+                    from valentine.core.scheduler import Scheduler
+                    scheduler = Scheduler()
+                    message = action.get("message", "Reminder")
+                    delay = int(action.get("delay_seconds", 60))
+                    reminder = await scheduler.create_reminder(chat_id, msg.user_id, msg.user_name or "User", message, delay)
+                    execution_log.append(f"[reminder] Created one-shot reminder '{message}' to fire in {delay}s")
                 elif act == "voice_note":
                     text = action.get("text", "")
                     try:

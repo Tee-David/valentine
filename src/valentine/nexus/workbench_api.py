@@ -47,9 +47,9 @@ _tunnel_proc = None
 
 async def _start_cloudflare_tunnel():
     """Start cloudflared to expose port 8000 and save URL to Redis."""
-    import subprocess, re, shutil
-    cloudflared = shutil.which("cloudflared")
-    if not cloudflared:
+    import subprocess, re, shutil, time
+    cloudflared = shutil.which("cloudflared") or os.path.expanduser("~/.local/bin/cloudflared")
+    if not os.path.exists(cloudflared):
         logger.warning("cloudflared not found. Mini App will not have a public HTTPS URL.")
         return
 
@@ -62,7 +62,6 @@ async def _start_cloudflare_tunnel():
     )
     
     url_pattern = re.compile(r"(https://[a-z0-9-]+\.trycloudflare\.com)")
-    import time
     timeout = time.time() + 15
     while time.time() < timeout:
         line = _tunnel_proc.stderr.readline()

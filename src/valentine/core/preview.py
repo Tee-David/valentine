@@ -145,8 +145,9 @@ async def start_preview(
         raise RuntimeError(f"Dev server exited immediately. stderr: {stderr[:500]}")
 
     # Start the Cloudflare Quick Tunnel
-    tunnel_cmd = f"{cloudflared} tunnel --url http://localhost:{srv_port}"
-    logger.info(f"Starting tunnel: {tunnel_cmd}")
+    cloudflared_path = shutil.which("cloudflared") or os.path.expanduser("~/.local/bin/cloudflared")
+    tunnel_cmd = f"{cloudflared_path} tunnel --url http://127.0.0.1:{srv_port}"
+    logger.info(f"Starting cloudflared tunnel: {tunnel_cmd}")
     tunnel_proc = subprocess.Popen(
         tunnel_cmd,
         shell=True,
