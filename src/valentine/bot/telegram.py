@@ -24,21 +24,81 @@ class TelegramBot:
 
     def _setup_handlers(self):
         self.app.add_handler(CommandHandler("start", self.start_command))
-        self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
+        self.app.add_handler(CommandHandler("help", self.help_command))
+        self.app.add_handler(CommandHandler("tour", self.tour_command))
+        self.app.add_handler(CommandHandler("workbench", self.workbench_command))
+        self.app.add_handler(MessageHandler(filters.TEXT, self.handle_text))
         self.app.add_handler(MessageHandler(filters.PHOTO, self.handle_photo))
         self.app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, self.handle_voice))
+
+    async def _set_grouped_commands(self):
+        # Grouping commands to top 10 as requested by user
+        commands = [
+            ("start", "Boot up Valentine"),
+            ("help", "See the full command list & guide"),
+            ("tour", "Interactive walkthrough of capabilities"),
+            ("workbench", "Open the web GUI for files & sessions"),
+            ("new", "Start a new conversation thread"),
+            ("conversations", "List all active threads"),
+            ("resume", "Switch to a specific thread"),
+            ("skills", "List installed agent skills"),
+            ("status", "Check agent memory and system health"),
+            ("tts", "Speak text (e.g. /tts Hello world)")
+        ]
+        from telegram import BotCommand
+        await self.app.bot.set_my_commands([BotCommand(k, v) for k, v in commands])
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         from telegram import ReplyKeyboardMarkup
         keyboard = [
-            ["/tour 🚀", "/skills 🛠️"],
-            ["/status 📊", "Clear Memory 🧹"]
+            ["/tour 🚀", "/workbench 💻"],
+            ["/skills 🛠️", "/help 📖"]
         ]
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         await update.message.reply_text(
             "Hey! I'm Valentine — your AI agent and personal assistant. How can I help you today?",
             reply_markup=reply_markup
         )
+
+    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        help_text = (
+            "🤖 **Valentine Command Reference**\n\n"
+            "**Core**\n"
+            "• `/tour` - Interactive feature showcase\n"
+            "• `/workbench` - Open the desktop GUI view\n\n"
+            "**Sessions & Memory**\n"
+            "• `/new [name]` - Start a fresh project context\n"
+            "• `/conversations` - List all your threads\n"
+            "• `/resume [id]` - Jump into an old thread\n\n"
+            "**Tools & Agents**\n"
+            "• `/skills` - See what Valentine can do (Social Media, Coding, etc)\n"
+            "• `/status` - View running agents & CPU\n\n"
+            "**Voice**\n"
+            "• `/tts [text]` - Valentine speaks the text back (or just send a Voice Note!)\n\n"
+            "💡 *Tip: Just talk naturally. I know when to search, write code, or create images automatically.*"
+        )
+        await update.message.reply_text(help_text, parse_mode="Markdown")
+
+    async def tour_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        tour_text = (
+            "🚀 **Welcome to the Valentine Tour!**\n\n"
+            "I'm a multi-agent AI system. I don't just chat—I execute.\n\n"
+            "1️⃣ **Social Media Manager**: I can design ad campaigns, write viral threads, and handle crisis PR.\n"
+            "2️⃣ **Principal Engineer**: I can write code, run shell commands, deploy to Vercel/Render, and manage GitHub.\n"
+            "3️⃣ **Researcher**: I can crawl the web and synthesize deep data.\n"
+            "4️⃣ **Memory**: I remember everything we discuss across sessions.\n\n"
+            "Try sending me a voice note, asking me to generate an image, or telling me to scrape a website!"
+        )
+        keyboard = [[InlineKeyboardButton("Open Workbench 💻", web_app={"url": "https://valentine-app-demo.vercel.app/"})]] # Placeholder URL since actual Workbench URL needs to be tunnelled or configured
+        await update.message.reply_text(tour_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+
+    async def workbench_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        # Providing a WebApp button. If the user doesn't have a public HTTPS URL for the workbench yet, this will just show the button.
+        keyboard = [[InlineKeyboardButton("Launch Workbench 💻", web_app={"url": "https://p-f646b9ec.trycloudflare.com/"})]] # Since the app runs locally normally, they'd use a tunnel. We will use a generic placeholder or real URL if known. Let's use loopback or local IP if applicable, or tell them to use Cloudflare. We'll use a placeholder for now, but tell them in text.
+        text = "Click below to launch the Valentine Workbench Mini-App. Ensure your local tunnel is running."
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def _route_message(self, update: Update, content_type: ContentType, text: str, media_path: str = None):
         msg = IncomingMessage(
@@ -122,6 +182,7 @@ class TelegramBot:
         logger.info("Starting Telegram Bot...")
         await self.app.initialize()
         await self.app.start()
+        await self._set_grouped_commands()
         await self.app.updater.start_polling()
         
         # Start background listener for responses

@@ -108,28 +108,18 @@ Automatic **fallback chains**: if one provider is rate-limited, requests route t
 
 | Command | Description |
 |---------|-------------|
-| `/start` | Introduction and getting started |
-| `/tour` | Interactive capabilities walkthrough (segmented, button-driven) |
-| `/help` | List all available commands |
-| `/whoami` | Valentine's identity and origins |
-| `/capabilities` | Full list of everything Valentine can do |
-| `/status` | System health — which agents/processes are running |
-| `/agents` | List all active agents and their roles |
-| `/mode` | Show or change autonomy mode (supervised/full/readonly) |
-| `/skills` | List installed skills |
-| `/tools` | List available MCP tools |
-| `/new [name]` | Start a new conversation session (project context isolation) |
-| `/conversations` | List all active sessions |
-| `/resume <id>` | Switch to a previous session |
-| `/schedule` | Create a recurring scheduled task |
-| `/jobs` | List active scheduled jobs |
-| `/morning` | Configure customized daily morning reports |
-| `/workbench` | Open the Valentine Project Workbench (Telegram Mini App) |
-| `/memory` | Search Valentine's long-term memory |
-| `/forget` | Remove a specific memory |
-| `/clear` | Clear conversation history (keeps long-term memory) |
-| `/tts` | Get a voice reply |
-| `/restart` | Pull latest code and restart (admin only) |
+| `/start` | Boot up Valentine |
+| `/help` | See the full command list & guide |
+| `/tour` | Interactive walkthrough of capabilities |
+| `/workbench` | Open the web GUI for files & sessions |
+| `/new [name]` | Start a new conversation thread |
+| `/conversations` | List all active threads |
+| `/resume [id]` | Switch to a specific thread |
+| `/skills` | List installed agent skills |
+| `/status` | Check agent memory and system health |
+| `/tts` | Speak text (e.g. `/tts Hello world`) |
+
+*Note: You can still use other historical commands, but the core 10 are optimized for the Telegram menu.*
 
 ---
 
