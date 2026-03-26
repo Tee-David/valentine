@@ -224,6 +224,12 @@ class CodeSmithAgent(BaseAgent):
             '  {"action": "stop_preview", "path": "/path/to/project"} — Stop a running preview (omit path to stop all)\n'
             '  {"action": "voice_note", "text": "The message to speak"} — Send a distinct voice note to the user. Use this whenever the user asks for a voice note!\n'
             '  {"action": "respond", "text": "Your conversational response to the user"}\n\n'
+            "REMINDER & SCHEDULING RULES:\n"
+            "- 'remind me in X minutes/hours' → ALWAYS use create_reminder (one-shot, auto-deletes after firing)\n"
+            "- 'every hour/daily/weekly' → use schedule_job (recurring)\n"
+            "- 'stop/cancel/delete reminder' or 'stop reminding me' → ALWAYS: first use list_jobs to find the job_id, THEN use delete_job with that exact ID. NEVER claim you cancelled something without actually calling delete_job!\n"
+            "- If user says 'cancel' but there are no active jobs, tell them there's nothing to cancel.\n"
+            "- NEVER use schedule_job for one-time reminders. ALWAYS use create_reminder.\n\n"
             "RULES:\n"
             "- ALWAYS include a 'respond' action as the LAST action with a natural, "
             "conversational explanation of what you did and why.\n"
@@ -653,19 +659,30 @@ class CodeSmithAgent(BaseAgent):
                 elif act == "voice_note":
                     text = action.get("text", "")
                     try:
-                        import uuid, os, asyncio
+                        import uuid, os, asyncio, sys, subprocess as sp
                         from valentine.config import settings
                         from valentine.models import ContentType
-                        out_path = os.path.join(settings.workspace_dir, f"voice_{uuid.uuid4().hex[:8]}.mp3")
-                        cmd = ["edge-tts", "--text", text, "--write-media", out_path]
-                        proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-                        await proc.communicate()
-                        if proc.returncode == 0 and os.path.exists(out_path):
-                            final_media_path = out_path
+                        piper_bin = os.path.join(os.path.dirname(sys.executable), "piper")
+                        piper_model = "/opt/valentine/models/piper/en_US-lessac-medium.onnx"
+                        wav_path = os.path.join(settings.workspace_dir, f"voice_{uuid.uuid4().hex[:8]}.wav")
+                        ogg_path = wav_path.replace(".wav", ".ogg")
+                        proc = sp.run(
+                            [piper_bin, "--model", piper_model, "--output_file", wav_path],
+                            input=text, capture_output=True, text=True, timeout=60,
+                        )
+                        if proc.returncode == 0 and os.path.exists(wav_path):
+                            # Convert WAV → OGG for Telegram
+                            sp.run(["ffmpeg", "-y", "-i", wav_path, "-c:a", "libopus", ogg_path],
+                                   capture_output=True, timeout=30)
+                            if os.path.exists(ogg_path):
+                                os.remove(wav_path)
+                                final_media_path = ogg_path
+                            else:
+                                final_media_path = wav_path
                             content_type = ContentType.VOICE
-                            execution_log.append(f"[voice] Generated MP3 voice note")
+                            execution_log.append(f"[voice] Generated voice note via Piper TTS")
                         else:
-                            execution_log.append(f"[voice] Failed to generate TTS")
+                            execution_log.append(f"[voice] Piper TTS failed: {proc.stderr[:200]}")
                     except Exception as e:
                         execution_log.append(f"[voice] Error: {e}")
                 elif act == "respond":

@@ -90,19 +90,37 @@ class EchoAgent(BaseAgent):
             logger.error(f"Audio conversion error: {e}")
         return audio_path
 
+    PIPER_MODEL = "/opt/valentine/models/piper/en_US-lessac-medium.onnx"
+
     async def _generate_tts(self, text: str) -> str:
-        out_path = os.path.join(
-            settings.workspace_dir, f"response_{uuid.uuid4().hex[:8]}.mp3",
+        """Generate speech audio using Piper TTS (offline, CPU-optimized)."""
+        import sys
+        piper_bin = os.path.join(os.path.dirname(sys.executable), "piper")
+        wav_path = os.path.join(
+            settings.workspace_dir, f"response_{uuid.uuid4().hex[:8]}.wav",
         )
+        ogg_path = wav_path.replace(".wav", ".ogg")
         try:
-            cmd = ["edge-tts", "--text", text, "--write-media", out_path]
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-            if proc.returncode == 0 and os.path.exists(out_path):
-                return out_path
-            logger.error(f"TTS generation failed: {proc.stderr}")
-            return ""
+            # Piper reads text from stdin and writes WAV
+            proc = subprocess.run(
+                [piper_bin, "--model", self.PIPER_MODEL, "--output_file", wav_path],
+                input=text, capture_output=True, text=True, timeout=60,
+            )
+            if proc.returncode != 0 or not os.path.exists(wav_path):
+                logger.error(f"Piper TTS failed: {proc.stderr}")
+                return ""
+            # Convert WAV → OGG (Telegram native voice format)
+            ffmpeg_proc = subprocess.run(
+                ["ffmpeg", "-y", "-i", wav_path, "-c:a", "libopus", ogg_path],
+                capture_output=True, timeout=30,
+            )
+            if ffmpeg_proc.returncode == 0 and os.path.exists(ogg_path):
+                os.remove(wav_path)
+                return ogg_path
+            # Fallback to WAV if ffmpeg conversion fails
+            return wav_path
         except FileNotFoundError:
-            logger.warning("edge-tts not installed or not in PATH.")
+            logger.warning("piper or ffmpeg not found in PATH.")
             return ""
         except subprocess.TimeoutExpired:
             logger.warning("TTS generation timed out")
@@ -176,9 +194,11 @@ class EchoAgent(BaseAgent):
 
                 logger.info(f"Echo transcribing audio file: {audio_path}")
                 try:
+                    import sys
+                    whisper_bin = os.path.join(os.path.dirname(sys.executable), "insanely-fast-whisper")
                     output_json = os.path.join(settings.workspace_dir, f"transcript_{uuid.uuid4().hex[:8]}.json")
                     cmd = [
-                        "insanely-fast-whisper",
+                        whisper_bin,
                         "--file-name", audio_path,
                         "--device", "cpu",
                         "--model", "openai/whisper-base",
