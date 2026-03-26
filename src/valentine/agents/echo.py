@@ -165,7 +165,8 @@ class EchoAgent(BaseAgent):
 
         try:
             # 1. Transcription (only for audio messages)
-            if has_audio and self.audio_llm:
+            if has_audio:
+                import asyncio
                 audio_path = msg.media_path
 
                 # Telegram voice = .oga/.ogg/.opus — convert to WAV for Whisper
@@ -175,19 +176,36 @@ class EchoAgent(BaseAgent):
 
                 logger.info(f"Echo transcribing audio file: {audio_path}")
                 try:
-                    transcript = await self.audio_llm.transcribe_audio(audio_path)
+                    output_json = os.path.join(settings.workspace_dir, f"transcript_{uuid.uuid4().hex[:8]}.json")
+                    cmd = [
+                        "insanely-fast-whisper",
+                        "--file-name", audio_path,
+                        "--device", "cpu",
+                        "--model", "openai/whisper-base",
+                        "--transcript-path", output_json
+                    ]
+                    
+                    # Run STT directly using locally installed insanely-fast-whisper
+                    proc = await asyncio.create_subprocess_exec(
+                        *cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                    )
+                    await proc.communicate()
+                    
+                    if proc.returncode == 0 and os.path.exists(output_json):
+                        with open(output_json, "r") as f:
+                            data = json.load(f)
+                            transcript = data.get("text", "")
+                        os.remove(output_json)
+                    else:
+                        raise RuntimeError(f"Whisper STT failed. Check logs.")
+                        
                     logger.info(f"Transcription result: {transcript}")
                 except Exception as e:
-                    logger.error(f"Failed to transcribe: {e}")
+                    logger.error(f"Failed to transcribe locally: {e}")
                     return TaskResult(
                         task_id=task.task_id, agent=self.name,
                         success=False, error="I couldn't understand that voice message. Try again?",
                     )
-            elif has_audio and not self.audio_llm:
-                return TaskResult(
-                    task_id=task.task_id, agent=self.name,
-                    success=False, error="Voice processing isn't available right now.",
-                )
 
             if not transcript:
                 return TaskResult(
